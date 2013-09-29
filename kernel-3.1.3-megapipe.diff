@@ -1,0 +1,648 @@
+Index: fs/eventpoll.c
+===================================================================
+--- fs/eventpoll.c	(revision 134)
++++ fs/eventpoll.c	(working copy)
+@@ -26,7 +26,6 @@
+ #include <linux/hash.h>
+ #include <linux/spinlock.h>
+ #include <linux/syscalls.h>
+-#include <linux/rbtree.h>
+ #include <linux/wait.h>
+ #include <linux/eventpoll.h>
+ #include <linux/mount.h>
+@@ -95,15 +94,8 @@
+ 
+ #define EP_MAX_EVENTS (INT_MAX / sizeof(struct epoll_event))
+ 
+-#define EP_UNACTIVE_PTR ((void *) -1L)
+-
+ #define EP_ITEM_COST (sizeof(struct epitem) + sizeof(struct eppoll_entry))
+ 
+-struct epoll_filefd {
+-	struct file *file;
+-	int fd;
+-};
+-
+ /*
+  * Structure used to track possible nested calls, for too deep recursions
+  * and loop cycles.
+@@ -123,82 +115,6 @@
+ 	spinlock_t lock;
+ };
+ 
+-/*
+- * Each file descriptor added to the eventpoll interface will
+- * have an entry of this type linked to the "rbr" RB tree.
+- */
+-struct epitem {
+-	/* RB tree node used to link this structure to the eventpoll RB tree */
+-	struct rb_node rbn;
+-
+-	/* List header used to link this structure to the eventpoll ready list */
+-	struct list_head rdllink;
+-
+-	/*
+-	 * Works together "struct eventpoll"->ovflist in keeping the
+-	 * single linked chain of items.
+-	 */
+-	struct epitem *next;
+-
+-	/* The file descriptor information this item refers to */
+-	struct epoll_filefd ffd;
+-
+-	/* Number of active wait queue attached to poll operations */
+-	int nwait;
+-
+-	/* List containing poll wait queues */
+-	struct list_head pwqlist;
+-
+-	/* The "container" of this item */
+-	struct eventpoll *ep;
+-
+-	/* List header used to link this item to the "struct file" items list */
+-	struct list_head fllink;
+-
+-	/* The structure that describe the interested events and the source fd */
+-	struct epoll_event event;
+-};
+-
+-/*
+- * This structure is stored inside the "private_data" member of the file
+- * structure and represents the main data structure for the eventpoll
+- * interface.
+- */
+-struct eventpoll {
+-	/* Protect the access to this structure */
+-	spinlock_t lock;
+-
+-	/*
+-	 * This mutex is used to ensure that files are not removed
+-	 * while epoll is using them. This is held during the event
+-	 * collection loop, the file cleanup path, the epoll file exit
+-	 * code and the ctl operations.
+-	 */
+-	struct mutex mtx;
+-
+-	/* Wait queue used by sys_epoll_wait() */
+-	wait_queue_head_t wq;
+-
+-	/* Wait queue used by file->poll() */
+-	wait_queue_head_t poll_wait;
+-
+-	/* List of ready file descriptors */
+-	struct list_head rdllist;
+-
+-	/* RB tree root used to store monitored fd structs */
+-	struct rb_root rbr;
+-
+-	/*
+-	 * This is a single linked list that chains all the "struct epitem" that
+-	 * happened while transferring ready events to userspace w/out
+-	 * holding ->lock.
+-	 */
+-	struct epitem *ovflist;
+-
+-	/* The user that created the eventpoll descriptor */
+-	struct user_struct *user;
+-};
+-
+ /* Wait structure used by the poll hooks */
+ struct eppoll_entry {
+ 	/* List header used to link this structure to the "struct epitem" */
+@@ -477,7 +393,7 @@
+  *
+  * Returns: The same integer error code returned by the @sproc callback.
+  */
+-static int ep_scan_ready_list(struct eventpoll *ep,
++int ep_scan_ready_list(struct eventpoll *ep,
+ 			      int (*sproc)(struct eventpoll *,
+ 					   struct list_head *, void *),
+ 			      void *priv,
+@@ -561,12 +477,13 @@
+ 
+ 	return error;
+ }
++EXPORT_SYMBOL(ep_scan_ready_list);
+ 
+ /*
+  * Removes a "struct epitem" from the eventpoll RB tree and deallocates
+  * all the associated resources. Must be called with "mtx" held.
+  */
+-static int ep_remove(struct eventpoll *ep, struct epitem *epi)
++int ep_remove(struct eventpoll *ep, struct epitem *epi)
+ {
+ 	unsigned long flags;
+ 	struct file *file = epi->ffd.file;
+@@ -601,8 +518,9 @@
+ 
+ 	return 0;
+ }
++EXPORT_SYMBOL(ep_remove);
+ 
+-static void ep_free(struct eventpoll *ep)
++void ep_free(struct eventpoll *ep)
+ {
+ 	struct rb_node *rbp;
+ 	struct epitem *epi;
+@@ -646,6 +564,7 @@
+ 	free_uid(ep->user);
+ 	kfree(ep);
+ }
++EXPORT_SYMBOL(ep_free);
+ 
+ static int ep_eventpoll_release(struct inode *inode, struct file *file)
+ {
+@@ -756,7 +675,7 @@
+ 	mutex_unlock(&epmutex);
+ }
+ 
+-static int ep_alloc(struct eventpoll **pep)
++int ep_alloc(struct eventpoll **pep)
+ {
+ 	int error;
+ 	struct user_struct *user;
+@@ -785,13 +704,14 @@
+ 	free_uid(user);
+ 	return error;
+ }
++EXPORT_SYMBOL(ep_alloc);
+ 
+ /*
+  * Search the file inside the eventpoll tree. The RB tree operations
+  * are protected by the "mtx" mutex, and ep_find() must be called with
+  * "mtx" held.
+  */
+-static struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd)
++struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd)
+ {
+ 	int kcmp;
+ 	struct rb_node *rbp;
+@@ -814,6 +734,7 @@
+ 
+ 	return epir;
+ }
++EXPORT_SYMBOL(ep_find);
+ 
+ /*
+  * This is the callback that is passed to the wait queue wakeup
+@@ -929,7 +850,7 @@
+ /*
+  * Must be called with "mtx" held.
+  */
+-static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
++int ep_insert(struct eventpoll *ep, struct epoll_event *event,
+ 		     struct file *tfile, int fd)
+ {
+ 	int error, revents, pwake = 0;
+@@ -1029,12 +950,13 @@
+ 
+ 	return error;
+ }
++EXPORT_SYMBOL(ep_insert);
+ 
+ /*
+  * Modify the interest event mask by dropping an event if the new mask
+  * has a match in the current file status. Must be called with "mtx" held.
+  */
+-static int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event)
++int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event)
+ {
+ 	int pwake = 0;
+ 	unsigned int revents;
+@@ -1077,6 +999,7 @@
+ 
+ 	return 0;
+ }
++EXPORT_SYMBOL(ep_modify);
+ 
+ static int ep_send_events_proc(struct eventpoll *ep, struct list_head *head,
+ 			       void *priv)
+Index: include/net/sock.h
+===================================================================
+--- include/net/sock.h	(revision 134)
++++ include/net/sock.h	(working copy)
+@@ -339,6 +339,7 @@
+ #endif
+ 	__u32			sk_mark;
+ 	u32			sk_classid;
++	unsigned long		cpumask;
+ 	void			(*sk_state_change)(struct sock *sk);
+ 	void			(*sk_data_ready)(struct sock *sk, int bytes);
+ 	void			(*sk_write_space)(struct sock *sk);
+Index: include/linux/eventpoll.h
+===================================================================
+--- include/linux/eventpoll.h	(revision 134)
++++ include/linux/eventpoll.h	(working copy)
+@@ -17,6 +17,7 @@
+ /* For O_CLOEXEC */
+ #include <linux/fcntl.h>
+ #include <linux/types.h>
++#include <linux/rbtree.h>
+ 
+ /* Flags for epoll_create1.  */
+ #define EPOLL_CLOEXEC O_CLOEXEC
+@@ -51,12 +52,109 @@
+ 
+ #ifdef __KERNEL__
+ 
++#define EP_UNACTIVE_PTR ((void *) -1L)
++
+ /* Forward declarations to avoid compiler errors */
+ struct file;
+ 
+ 
+ #ifdef CONFIG_EPOLL
+ 
++struct epoll_filefd {
++	struct file *file;
++	int fd;
++};
++
++/*
++ * Each file descriptor added to the eventpoll interface will
++ * have an entry of this type linked to the "rbr" RB tree.
++ */
++struct epitem {
++	/* RB tree node used to link this structure to the eventpoll RB tree */
++	struct rb_node rbn;
++
++	/* List header used to link this structure to the eventpoll ready list */
++	struct list_head rdllink;
++
++	/*
++	 * Works together "struct eventpoll"->ovflist in keeping the
++	 * single linked chain of items.
++	 */
++	struct epitem *next;
++
++	/* The file descriptor information this item refers to */
++	struct epoll_filefd ffd;
++
++	/* Number of active wait queue attached to poll operations */
++	int nwait;
++
++	/* List containing poll wait queues */
++	struct list_head pwqlist;
++
++	/* The "container" of this item */
++	struct eventpoll *ep;
++
++	/* List header used to link this item to the "struct file" items list */
++	struct list_head fllink;
++
++	/* The structure that describe the interested events and the source fd */
++	struct epoll_event event;
++};
++
++/*
++ * This structure is stored inside the "private_data" member of the file
++ * structure and represents the main data structure for the eventpoll
++ * interface.
++ */
++struct eventpoll {
++	/* Protect the access to this structure */
++	spinlock_t lock;
++
++	/*
++	 * This mutex is used to ensure that files are not removed
++	 * while epoll is using them. This is held during the event
++	 * collection loop, the file cleanup path, the epoll file exit
++	 * code and the ctl operations.
++	 */
++	struct mutex mtx;
++
++	/* Wait queue used by sys_epoll_wait() */
++	wait_queue_head_t wq;
++
++	/* Wait queue used by file->poll() */
++	wait_queue_head_t poll_wait;
++
++	/* List of ready file descriptors */
++	struct list_head rdllist;
++
++	/* RB tree root used to store monitored fd structs */
++	struct rb_root rbr;
++
++	/*
++	 * This is a single linked list that chains all the "struct epitem" that
++	 * happened while transferring ready events to userspace w/out
++	 * holding ->lock.
++	 */
++	struct epitem *ovflist;
++
++	/* The user that created the eventpoll descriptor */
++	struct user_struct *user;
++};
++
++extern int ep_alloc(struct eventpoll **pep);
++extern void ep_free(struct eventpoll *ep);
++extern int ep_insert(struct eventpoll *ep, struct epoll_event *event,
++		struct file *tfile, int fd);
++extern int ep_modify(struct eventpoll *ep, struct epitem *epi, 
++		struct epoll_event *event);
++extern int ep_remove(struct eventpoll *ep, struct epitem *epi);
++extern struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd);
++extern int ep_scan_ready_list(struct eventpoll *ep,
++			      int (*sproc)(struct eventpoll *,
++					   struct list_head *, void *),
++			      void *priv,
++			      int depth);
++
+ /* Used to initialize the epoll bits inside the "struct file" */
+ static inline void eventpoll_init_file(struct file *file)
+ {
+Index: include/linux/net.h
+===================================================================
+--- include/linux/net.h	(revision 134)
++++ include/linux/net.h	(working copy)
+@@ -43,6 +43,7 @@
+ #define SYS_ACCEPT4	18		/* sys_accept4(2)		*/
+ #define SYS_RECVMMSG	19		/* sys_recvmmsg(2)		*/
+ #define SYS_SENDMMSG	20		/* sys_sendmmsg(2)		*/
++#define SYS_LISTENSPAWN	21
+ 
+ typedef enum {
+ 	SS_FREE = 0,			/* not allocated		*/
+Index: include/linux/syscalls.h
+===================================================================
+--- include/linux/syscalls.h	(revision 134)
++++ include/linux/syscalls.h	(working copy)
+@@ -623,6 +623,7 @@
+ asmlinkage long sys_socketpair(int, int, int, int __user *);
+ asmlinkage long sys_socketcall(int call, unsigned long __user *args);
+ asmlinkage long sys_listen(int, int);
++asmlinkage long sys_listenspawn(int, unsigned long, int);
+ asmlinkage long sys_poll(struct pollfd __user *ufds, unsigned int nfds,
+ 				long timeout);
+ asmlinkage long sys_select(int n, fd_set __user *inp, fd_set __user *outp,
+Index: net/ipv4/inet_hashtables.c
+===================================================================
+--- net/ipv4/inet_hashtables.c	(revision 134)
++++ net/ipv4/inet_hashtables.c	(working copy)
+@@ -147,6 +147,7 @@
+ {
+ 	int score = -1;
+ 	struct inet_sock *inet = inet_sk(sk);
++	int processor_id = smp_processor_id();
+ 
+ 	if (net_eq(sock_net(sk), net) && inet->inet_num == hnum &&
+ 			!ipv6_only_sock(sk)) {
+@@ -162,6 +163,11 @@
+ 				return -1;
+ 			score += 2;
+ 		}
++
++		if (sk->cpumask == 0)
++			score++;
++		if (sk->cpumask & (1 << processor_id))
++			score += 2;
+ 	}
+ 	return score;
+ }
+Index: net/ipv4/inet_connection_sock.c
+===================================================================
+--- net/ipv4/inet_connection_sock.c	(revision 134)
++++ net/ipv4/inet_connection_sock.c	(working copy)
+@@ -59,6 +59,10 @@
+ 	struct hlist_node *node;
+ 	int reuse = sk->sk_reuse;
+ 
++	/* Yeah, what a platinum pass */
++	if (sk->cpumask)
++		return 0;
++
+ 	/*
+ 	 * Unlike other sk lookup places we do not check
+ 	 * for sk_net here, since _all_ the socks listed
+Index: net/socket.c
+===================================================================
+--- net/socket.c	(revision 134)
++++ net/socket.c	(working copy)
+@@ -132,7 +132,7 @@
+  *	in the operation structures but are done directly via the socketcall() multiplexor.
+  */
+ 
+-static const struct file_operations socket_file_ops = {
++const struct file_operations socket_file_ops = {
+ 	.owner =	THIS_MODULE,
+ 	.llseek =	no_llseek,
+ 	.aio_read =	sock_aio_read,
+@@ -150,6 +150,7 @@
+ 	.splice_write = generic_splice_sendpage,
+ 	.splice_read =	sock_splice_read,
+ };
++EXPORT_SYMBOL(socket_file_ops);
+ 
+ /*
+  *	The protocol list. Each protocol is registered in here.
+@@ -1471,6 +1472,109 @@
+ 	return err;
+ }
+ 
++#include <net/inet_common.h>
++#include <net/inet_sock.h>
++#include <net/tcp_states.h>
++
++static int clone_socket(struct socket *sock, struct socket **nsock)
++{
++	struct sock *sk = sock->sk;
++
++	int family = PF_INET;
++	int type = sock->type;
++	int protocol = sk->sk_protocol;
++
++	return sock_create(family, type, protocol, nsock);
++}
++
++SYSCALL_DEFINE3(listenspawn, int, fd, unsigned long, cpumask, int, backlog)
++{
++	struct socket *sock = NULL;
++	struct socket *nsock = NULL;
++	struct sockaddr_in addr;
++	int ret, nfd, fput_needed;
++	int somaxconn;
++
++	printk("listenspawn called! %d %lu %d\n", fd, cpumask, backlog);
++
++	if (cpumask == 0UL) {
++		ret = -EINVAL;
++		goto out;
++	}
++
++	sock = sockfd_lookup_light(fd, &ret, &fput_needed);
++	if (sock) {
++		somaxconn = sock_net(sock->sk)->core.sysctl_somaxconn;
++		if ((unsigned)backlog > somaxconn)
++			backlog = somaxconn;
++
++		/* currently it supports inet only */
++		if (sock->ops != &inet_stream_ops) {
++			printk("no inet stream socket?\n");
++			ret = -EINVAL;
++			goto out_fput;
++		}
++
++		if (!sock->sk || sock->sk->sk_state != TCP_LISTEN) {
++			printk("not in TCP_LISTEN or sock->sk == NULL?\n");
++			ret = -EINVAL;
++			goto out_fput;
++		}
++
++		/* You cannot spawn out of a spawned socket */
++		if (sock->sk->cpumask) {
++			printk("sock->sk->cpumask != 0\n");
++			ret = -EINVAL;
++			goto out_fput;
++		}
++
++		ret = clone_socket(sock, &nsock);
++		if (ret < 0) {
++			printk("clone_socket() failed\n");
++			goto out_fput;
++		}
++
++		nsock->sk->cpumask = cpumask;
++
++		/* Should we clone the flags as well? Possible flags are
++		 * O_CLOEXEC and O_NONBLOCK */
++		ret = sock_map_fd(nsock, /* flags = */ 0);
++		if (ret < 0) {
++			printk("sock_map_fd() failed\n");
++			goto out_release;
++		}
++		nfd = ret;
++
++		/* bind() here. Confliction with the original listening socket 
++		 * is handled in inet_csk_bind() */
++		addr.sin_family = AF_INET;
++		addr.sin_port = inet_sk(sock->sk)->inet_sport;
++		addr.sin_addr.s_addr = inet_sk(sock->sk)->inet_saddr;
++		ret = inet_bind(nsock, (struct sockaddr *)&addr, sizeof(addr));
++		if (ret < 0) {
++			printk("inet_bind() failed\n");
++			goto out_release;
++		}
++
++		ret = inet_listen(nsock, backlog);
++		if (ret < 0) {
++			printk("inet_listen() failed\n");
++			goto out_release;
++		}
++
++		ret = nfd;
++		goto out_fput;
++
++out_release:
++		sock_release(nsock);
++
++out_fput:
++		fput_light(sock->file, fput_needed);
++	}
++out:
++	return ret;
++}
++
+ /*
+  *	For accept, we attempt to create a new socket, set up the link
+  *	with the client, wake up the client, then return the new
+@@ -2326,11 +2430,11 @@
+ #ifdef __ARCH_WANT_SYS_SOCKETCALL
+ /* Argument list sizes for sys_socketcall */
+ #define AL(x) ((x) * sizeof(unsigned long))
+-static const unsigned char nargs[21] = {
++static const unsigned char nargs[22] = {
+ 	AL(0), AL(3), AL(3), AL(3), AL(2), AL(3),
+ 	AL(3), AL(3), AL(4), AL(4), AL(4), AL(6),
+ 	AL(6), AL(2), AL(5), AL(5), AL(3), AL(3),
+-	AL(4), AL(5), AL(4)
++	AL(4), AL(5), AL(4), AL(3)
+ };
+ 
+ #undef AL
+@@ -2439,6 +2543,10 @@
+ 		err = sys_accept4(a0, (struct sockaddr __user *)a1,
+ 				  (int __user *)a[2], a[3]);
+ 		break;
++	case SYS_LISTENSPAWN:
++		printk("sys_socketcall for listenspawn called!\n");
++		err = sys_listenspawn(a0, a1, a[2]);
++		break;
+ 	default:
+ 		err = -EINVAL;
+ 		break;
+Index: net/compat.c
+===================================================================
+--- net/compat.c	(revision 134)
++++ net/compat.c	(working copy)
+@@ -722,11 +722,11 @@
+ 
+ /* Argument list sizes for compat_sys_socketcall */
+ #define AL(x) ((x) * sizeof(u32))
+-static unsigned char nas[21] = {
++static unsigned char nas[22] = {
+ 	AL(0), AL(3), AL(3), AL(3), AL(2), AL(3),
+ 	AL(3), AL(3), AL(4), AL(4), AL(4), AL(6),
+ 	AL(6), AL(2), AL(5), AL(5), AL(3), AL(3),
+-	AL(4), AL(5), AL(4)
++	AL(4), AL(5), AL(4), AL(3)
+ };
+ #undef AL
+ 
+@@ -859,6 +859,9 @@
+ 	case SYS_ACCEPT4:
+ 		ret = sys_accept4(a0, compat_ptr(a1), compat_ptr(a[2]), a[3]);
+ 		break;
++	case SYS_LISTENSPAWN:
++		ret = sys_listenspawn(a0, a1, a[2]);
++		break;
+ 	default:
+ 		ret = -EINVAL;
+ 		break;
+Index: update_cscope.sh
+===================================================================
+--- update_cscope.sh	(revision 0)
++++ update_cscope.sh	(revision 141)
+@@ -0,0 +1,12 @@
++#!/bin/bash
++
++find . \
++	-path "./arch/*" ! -path "./arch/x86*" -prune -o               \
++	-path "./tmp*" -prune -o                                           \
++	-path "./Documentation*" -prune -o                                 \
++	-path "./scripts*" -prune -o                                       \
++	-path "./drivers*" -prune -o                                       \
++	-path "./debian*" -prune -o                                       \
++	-name "*.[chxsS]" -print > cscope.files
++
++cscope -b -R -k
+
+Property changes on: update_cscope.sh
+___________________________________________________________________
+Added: svn:executable
+   + *
+
+Index: kernel/sys_ni.c
+===================================================================
+--- kernel/sys_ni.c	(revision 134)
++++ kernel/sys_ni.c	(working copy)
+@@ -29,6 +29,7 @@
+ cond_syscall(sys_socketpair);
+ cond_syscall(sys_bind);
+ cond_syscall(sys_listen);
++cond_syscall(sys_listenspawn);
+ cond_syscall(sys_accept);
+ cond_syscall(sys_accept4);
+ cond_syscall(sys_connect);
+Index: arch/x86/include/asm/unistd_64.h
+===================================================================
+--- arch/x86/include/asm/unistd_64.h	(revision 134)
++++ arch/x86/include/asm/unistd_64.h	(working copy)
+@@ -683,6 +683,8 @@
+ __SYSCALL(__NR_setns, sys_setns)
+ #define __NR_getcpu				309
+ __SYSCALL(__NR_getcpu, sys_getcpu)
++#define __NR_listenspawn			310
++__SYSCALL(__NR_listenspawn, sys_listenspawn)
+ 
+ #ifndef __NO_STUBS
+ #define __ARCH_WANT_OLD_READDIR
