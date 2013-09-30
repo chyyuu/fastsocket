@@ -39,6 +39,10 @@
 #include <asm/mman.h>
 #include <asm/atomic.h>
 
+//XIAOFENG6
+#include <linux/module.h>
+//XIAOFENG6
+
 /*
  * LOCKING:
  * There are three level of locking required by epoll :
@@ -731,6 +735,8 @@ void eventpoll_release_file(struct file *file)
 
 	mutex_unlock(&epmutex);
 }
+
+EXPORT_SYMBOL(eventpoll_release_file);
 
 static int ep_alloc(struct eventpoll **pep)
 {

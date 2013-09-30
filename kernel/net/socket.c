@@ -194,6 +194,10 @@ int move_addr_to_kernel(void __user *uaddr, int ulen, struct sockaddr *kaddr)
 	return audit_sockaddr(ulen, kaddr);
 }
 
+//XIAOFENG6
+EXPORT_SYMBOL(move_addr_to_kernel);
+//XIAOFENG6
+
 /**
  *	move_addr_to_user	-	copy an address to user space
  *	@kaddr: kernel space address
@@ -236,6 +240,10 @@ int move_addr_to_user(struct sockaddr *kaddr, int klen, void __user *uaddr,
 	 */
 	return __put_user(klen, ulen);
 }
+
+//XIAOFENG6
+EXPORT_SYMBOL(move_addr_to_user);
+//XIAOFENG6
 
 static struct kmem_cache *sock_inode_cachep __read_mostly;
 
@@ -410,7 +418,10 @@ int sock_map_fd(struct socket *sock, int flags)
 
 static struct socket *sock_from_file(struct file *file, int *err)
 {
-	if (file->f_op == &socket_file_ops)
+	//XIAOFENG6
+	//if (file->f_op == &socket_file_ops)
+	if (file->f_mode & FMODE_FASTSOCKET || file->f_op == &socket_file_ops)
+	//XIAOFENG6
 		return file->private_data;	/* set in sock_map_fd */
 
 	*err = -ENOTSOCK;
@@ -2700,6 +2711,13 @@ int kernel_sock_shutdown(struct socket *sock, enum sock_shutdown_cmd how)
 	return sock->ops->shutdown(sock, how);
 }
 
+//XIAOFENG6
+EXPORT_SYMBOL(sys_accept);
+EXPORT_SYMBOL(sys_listen);
+EXPORT_SYMBOL(sys_bind);
+EXPORT_SYMBOL(sys_socket);
+EXPORT_SYMBOL(sys_connect);
+//XIAOFENG6
 EXPORT_SYMBOL(sock_create);
 EXPORT_SYMBOL(sock_create_kern);
 EXPORT_SYMBOL(sock_create_lite);

@@ -150,6 +150,17 @@ fail:
 	return NULL;
 }
 
+//XIAOFENG6
+EXPORT_SYMBOL(get_empty_filp);
+
+void put_empty_filp(struct file *file)
+{
+	file_free(file);
+}
+
+EXPORT_SYMBOL(put_empty_filp);
+//XIAOFENG6
+
 /**
  * alloc_file - allocate and initialize a 'struct file'
  * @mnt: the vfsmount on which the file will reside
@@ -319,6 +330,10 @@ struct file *fget_light(unsigned int fd, int *fput_needed)
 
 	return file;
 }
+
+//XIAOFENG6
+EXPORT_SYMBOL(fget_light);
+//XIAOFENG6
 
 /* wrapper routines for Taobao tlock */
 struct file *tlock_fget_light(unsigned int fd, int *fput_needed)

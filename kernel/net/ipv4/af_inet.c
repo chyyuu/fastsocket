@@ -262,8 +262,11 @@ static inline int inet_netns_ok(struct net *net, int protocol)
  *	Create an inet socket.
  */
 
-static int inet_create(struct net *net, struct socket *sock, int protocol,
+//XIAOFENG6
+//static int inet_create(struct net *net, struct socket *sock, int protocol,
+int inet_create(struct net *net, struct socket *sock, int protocol,
 		       int kern)
+//XIAOFENG6
 {
 	struct sock *sk;
 	struct inet_protosw *answer;
@@ -405,6 +408,9 @@ out_rcu_unlock:
 	goto out;
 }
 
+//XIAOFENG6
+EXPORT_SYMBOL(inet_create);
+//XIAOFENG6
 
 /*
  *	The peer socket should always be NULL (or else). When we call this

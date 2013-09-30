@@ -86,6 +86,10 @@ struct inodes_stat_t {
 /* File is opened using open(.., 3, ..) and is writeable only for ioctls
    (specialy hack for floppy.c) */
 #define FMODE_WRITE_IOCTL	((__force fmode_t)256)
+//XIAOFENG6
+/* File is opened for fastsocket */
+#define FMODE_FASTSOCKET	((__force fmode_t)512)
+//XIAOFENG6
 
 /*
  * Don't update ctime and mtime.
@@ -2239,6 +2243,9 @@ extern void inode_init_once(struct inode *);
 extern void inode_add_to_lists(struct super_block *, struct inode *);
 extern void ihold(struct inode * inode);
 extern void iput(struct inode *);
+//XIAOFENG6
+extern void iput_fastsocket(struct inode *inode);
+//XIAOFENG6
 extern struct inode * igrab(struct inode *);
 extern ino_t iunique(struct super_block *, ino_t);
 extern int inode_needs_sync(struct inode *inode);

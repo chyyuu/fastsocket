@@ -43,7 +43,10 @@ __cacheline_aligned_in_smp DEFINE_SEQLOCK(rename_lock);
 
 EXPORT_SYMBOL(dcache_lock);
 
-static struct kmem_cache *dentry_cache __read_mostly;
+//XIAOFENG6
+//static struct kmem_cache *dentry_cache __read_mostly;
+struct kmem_cache *dentry_cache __read_mostly;
+//XIAOFENG6
 
 #define DNAME_INLINE_LEN (sizeof(struct dentry)-offsetof(struct dentry,d_iname))
 
@@ -212,10 +215,35 @@ static struct dentry *d_kill(struct dentry *dentry)
  * no dcache lock, please.
  */
 
+//XIAOFENG6
+void dput_fastsocket(struct dentry *dentry)
+{
+	struct inode *inode;
+
+	if (!atomic_dec_and_test(&dentry->d_count)) {
+		return;
+	}
+
+	inode = dentry->d_inode;
+	if (inode)
+		iput_fastsocket(inode);
+	//else
+	//	WARN_ON(1);
+
+	d_free(dentry);
+}
+EXPORT_SYMBOL(dput_fastsocket);
+//XIAOFENG6
+
 void dput(struct dentry *dentry)
 {
 	if (!dentry)
 		return;
+
+	//XIAOFENG6
+	if (dentry->d_flags & DCACHE_FASTSOCKET)
+		return dput_fastsocket(dentry);
+	//XIAOFENG6
 
 repeat:
 	if (atomic_read(&dentry->d_count) == 1)
@@ -2352,6 +2380,9 @@ void __init vfs_caches_init(unsigned long mempages)
 	chrdev_init();
 }
 
+//XIAOFENG6
+EXPORT_SYMBOL(dentry_cache);
+//XIAOFENG6
 EXPORT_SYMBOL(d_alloc);
 EXPORT_SYMBOL(d_alloc_root);
 EXPORT_SYMBOL(d_delete);

@@ -488,6 +488,9 @@ out:
 	spin_unlock(&files->file_lock);
 	return error;
 }
+//XIAOFENG6
+EXPORT_SYMBOL(alloc_fd);
+//XIAOFENG6
 
 int get_unused_fd(void)
 {

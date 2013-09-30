@@ -884,6 +884,21 @@ void fd_install(unsigned int fd, struct file *file)
 
 EXPORT_SYMBOL(fd_install);
 
+//XIAOFENG6
+void fd_reinstall(unsigned int fd, struct file *file)
+{
+	struct files_struct *files = current->files;
+	struct fdtable *fdt;
+	spin_lock(&files->file_lock);
+	fdt = files_fdtable(files);
+	BUG_ON(fdt->fd[fd] == NULL);
+	rcu_assign_pointer(fdt->fd[fd], file);
+	spin_unlock(&files->file_lock);
+}
+
+EXPORT_SYMBOL(fd_reinstall);
+//XIAOFENG6
+
 long do_sys_open(int dfd, const char __user *filename, int flags, int mode)
 {
 	char *tmp = getname(filename);
@@ -959,6 +974,12 @@ int filp_close(struct file *filp, fl_owner_t id)
 		return 0;
 	}
 
+	//XIAOFENG6
+	if (filp->f_mode & FMODE_FASTSOCKET && filp->f_op && filp->f_op->release) {
+		return filp->f_op->release(NULL, filp);
+	}
+	//XIAOFENG6
+	
 	if (filp->f_op && filp->f_op->flush)
 		retval = filp->f_op->flush(filp, id);
 

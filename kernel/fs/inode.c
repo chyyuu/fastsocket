@@ -1362,6 +1362,17 @@ void iput(struct inode *inode)
 }
 EXPORT_SYMBOL(iput);
 
+//XIAOFENG6
+void iput_fastsocket(struct inode *inode)
+{
+	if (atomic_dec_and_test(&inode->i_count)) {
+		if (inode->i_sb->s_op->destroy_inode)
+			inode->i_sb->s_op->destroy_inode(inode);
+	}
+}
+EXPORT_SYMBOL(iput_fastsocket);
+//XIAOFENG6
+
 /**
  *	bmap	- find a block number in a file
  *	@inode: inode of file
