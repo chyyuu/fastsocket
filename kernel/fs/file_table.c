@@ -320,6 +320,18 @@ struct file *fget_light(unsigned int fd, int *fput_needed)
 	return file;
 }
 
+/* wrapper routines for Taobao tlock */
+struct file *tlock_fget_light(unsigned int fd, int *fput_needed)
+{
+	return fget_light(fd, fput_needed);
+}
+EXPORT_SYMBOL(tlock_fget_light);
+
+void tlock_fput_light(struct file *file, int fput_needed)
+{
+	fput_light(file, fput_needed);
+}
+EXPORT_SYMBOL(tlock_fput_light);
 
 void put_filp(struct file *file)
 {
