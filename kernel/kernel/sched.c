@@ -6463,6 +6463,14 @@ static void __wake_up_common(wait_queue_head_t *q, unsigned int mode,
 	list_for_each_entry_safe(curr, next, &q->task_list, task_list) {
 		unsigned flags = curr->flags;
 
+		//XIAOFENG6
+		if (flags & WQ_FLAG_LOADBALANCE) {
+			curr->func(curr, mode, wake_flags, key);
+			list_move_tail(&curr->task_list, &q->task_list);
+			break;
+		}
+		//XIAOFENG6
+
 		if (curr->func(curr, mode, wake_flags, key) &&
 				(flags & WQ_FLAG_EXCLUSIVE) && !--nr_exclusive)
 			break;

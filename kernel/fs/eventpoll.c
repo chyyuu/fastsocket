@@ -41,6 +41,7 @@
 
 //XIAOFENG6
 #include <linux/module.h>
+#include <net/tcp.h>
 //XIAOFENG6
 
 /*
@@ -552,6 +553,10 @@ static int ep_remove(struct eventpoll *ep, struct epitem *epi)
 	unsigned long flags;
 	struct file *file = epi->ffd.file;
 
+	//XIAOFENG6
+	file->epoll_item = NULL;
+	//XIAOFENG6
+
 	/*
 	 * Removes poll wait queue hooks. We _have_ to do this without holding
 	 * the "ep->lock" otherwise a deadlock might occur. This because of the
@@ -880,6 +885,10 @@ static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 		init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
 		pwq->whead = whead;
 		pwq->base = epi;
+		//XIAOFENG6
+		if (file->f_mode & FMODE_FASTSOCKET)
+			pwq->wait.flags |= WQ_FLAG_LOADBALANCE;
+		//XIAOFENG6
 		add_wait_queue(whead, &pwq->wait);
 		list_add_tail(&pwq->llink, &epi->pwqlist);
 		epi->nwait++;
@@ -934,6 +943,12 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	epi->event = *event;
 	epi->nwait = 0;
 	epi->next = EP_UNACTIVE_PTR;
+
+	//XIAOFENG6
+	/* save epitem in file struct */
+	if (tfile->f_mode & FMODE_FASTSOCKET)
+		tfile->epoll_item = epi;
+	//XIAOFENG6
 
 	/* Initialize the poll table using the queue callback */
 	epq.epi = epi;
@@ -1007,6 +1022,10 @@ error_unregister:
 	spin_unlock_irqrestore(&ep->lock, flags);
 
 	kmem_cache_free(epi_cache, epi);
+
+	//XIAOFENG6
+	tfile->epoll_item = NULL;
+	//XIAOFENG6
 
 	return error;
 }
@@ -1370,7 +1389,20 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	 * above, we can be sure to be able to use the item looked up by
 	 * ep_find() till we release the mutex.
 	 */
-	epi = ep_find(ep, tfile, fd);
+
+	//XIAOFENG6
+	//epi = ep_find(ep, tfile, fd);
+	if (tfile->f_mode & FMODE_FASTSOCKET) {
+		struct socket *sock = (struct socket *)tfile->private_data;
+
+		if (unlikely(sock->sk->sk_state == TCP_LISTEN))
+			epi = ep_find(ep, tfile, fd);
+		else
+			epi = tfile->epoll_item;
+	}
+	else
+		epi = ep_find(ep, tfile, fd);
+	//XIAOFENG6
 
 	error = -EINVAL;
 	switch (op) {
