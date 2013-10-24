@@ -20,7 +20,7 @@ do {\
 	fprintf(stderr, "FATSOCKET LIBRARY:" msg, ##__VA_ARGS__);\
 }while(0)
 
-#define MAX_LISTEN_FD	4096
+#define MAX_LISTEN_FD	65536
 
 //XIAOFENG6
 //TODO: Need Lock?
@@ -89,49 +89,49 @@ int SYSCALL_DEFINE(socket, int family, int type, int protocol)
  * Description:
  *	listen  syscall
  */
-//int SYSCALL_DEFINE(listen, int fd, int backlog)
-//{
-//	int ret = 0;
-//	struct fsocket_ioctl_arg arg;
-//
-//	if (fsocket_channel_fd != 0) {
-//		arg.fd = fd;
-//		arg.backlog = backlog;
-//
-//		if (!fsocket_listen_fds[fd])
-//			fsocket_listen_fds[fd] = 1;
-//		else
-//			return -1;
-//
-//		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_LISTEN, &arg);
-//		if (ret < 0) {
-//			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Listen failed!\n");
-//			fsocket_listen_fds[fd] = 0;
-//		}
-//
-//	} else {
-//		ret =  SYSCALL(listen, fd, backlog);
-//	}
-//
-//	return ret;
-//}
-//
-//int listen_spawn(int fd)
-//{
-//	int ret = -1;
-//	struct fsocket_ioctl_arg arg;
-//
-//	if (fsocket_channel_fd != 0) {
-//		arg.fd = fd;
-//
-//		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
-//		if (ret < 0) {
-//			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Listen failed!\n");
-//		}
-//	}
-//
-//	return ret;
-//}
+int SYSCALL_DEFINE(listen, int fd, int backlog)
+{
+	int ret = 0;
+	struct fsocket_ioctl_arg arg;
+
+	if (fsocket_channel_fd != 0) {
+		arg.fd = fd;
+		arg.backlog = backlog;
+
+		if (!fsocket_listen_fds[fd])
+			fsocket_listen_fds[fd] = 1;
+		else
+			return -1;
+
+		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_LISTEN, &arg);
+		if (ret < 0) {
+			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Listen failed!\n");
+			fsocket_listen_fds[fd] = 0;
+		}
+
+	} else {
+		ret =  SYSCALL(listen, fd, backlog);
+	}
+
+	return ret;
+}
+
+int listen_spawn(int fd)
+{
+	int ret = -1;
+	struct fsocket_ioctl_arg arg;
+
+	if (fsocket_channel_fd != 0) {
+		arg.fd = fd;
+
+		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
+		if (ret < 0) {
+			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Listen failed!\n");
+		}
+	}
+
+	return ret;
+}
 
 /*
  * Description:
@@ -207,6 +207,9 @@ int SYSCALL_DEFINE(close, int fd)
 
 	if (fsocket_channel_fd != 0) {
 		arg.fd = fd;
+
+		if (fsocket_listen_fds[fd])
+			fsocket_listen_fds[fd] = 0;
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_CLOSE, &arg);
 		if (ret < 0) {
@@ -285,40 +288,40 @@ int SYSCALL_DEFINE(close, int fd)
 //	
 //}
 
-//int SYSCALL_DEFINE(epoll_ctl, int efd, int cmd, int fd, struct epoll_event *ev)
-//{
-//	int ret;
-//	struct fsocket_ioctl_arg arg;
-//
-//	if (fsocket_channel_fd != 0) {
-//		arg.fd = fd;
-//		arg.op.epoll_op.epoll_fd = efd;
-//		arg.op.epoll_op.ep_ctl_cmd = cmd;
-//		arg.op.epoll_op.ev = ev;
-//
-//		if (fsocket_listen_fds[fd]) {
-//			ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
-//			if (ret < 0) {
-//				FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Spawn failed!\n");
-//				//FIXME: as of now, ignore the spawn err.
-//				//return ret;
-//			}
-//		}
-//
-//		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_EPOLL_CTL, &arg);
-//		if (ret < 0) {
-//			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:epoll_ctl failed!\n");
-//			return ret;
-//		}	
-//		
-//
-//	} else {
-//		ret = SYSCALL(epoll_ctl, efd, cmd, fd, ev);
-//	}
-//
-//	return ret;
-//}
-//
+int SYSCALL_DEFINE(epoll_ctl, int efd, int cmd, int fd, struct epoll_event *ev)
+{
+	int ret;
+	struct fsocket_ioctl_arg arg;
+
+	if (fsocket_channel_fd != 0) {
+		arg.fd = fd;
+		arg.op.epoll_op.epoll_fd = efd;
+		arg.op.epoll_op.ep_ctl_cmd = cmd;
+		arg.op.epoll_op.ev = ev;
+
+		if (fsocket_listen_fds[fd]) {
+			ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
+			if (ret < 0) {
+				FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Spawn failed!\n");
+				//FIXME: as of now, ignore the spawn err.
+				//return ret;
+			}
+		}
+
+		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_EPOLL_CTL, &arg);
+		if (ret < 0) {
+			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:epoll_ctl failed!\n");
+			return ret;
+		}	
+		
+
+	} else {
+		ret = SYSCALL(epoll_ctl, efd, cmd, fd, ev);
+	}
+
+	return ret;
+}
+
 //int SYSCALL_DEFINE(epoll_wait, int efd, struct epoll_event *evts, int max_evts, int timeout)
 //{
 //	int ret;

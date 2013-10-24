@@ -989,6 +989,10 @@ struct file {
 		struct list_head	fu_list;
 		struct rcu_head 	fu_rcuhead;
 	} f_u;
+	//XIAOFENG6
+	struct file 		*sub_file;         
+	struct epitem		*epoll_item;
+	//XIAOFENG6
 	struct path		f_path;
 #define f_dentry	f_path.dentry
 #define f_vfsmnt	f_path.mnt
@@ -1012,9 +1016,6 @@ struct file {
 #ifdef CONFIG_EPOLL
 	/* Used by fs/eventpoll.c to link all the hooks to this file */
 	struct list_head	f_ep_links;
-	//XIAOFENG6
-	struct epitem		*epoll_item;
-	//XIAOFENG6
 #endif /* #ifdef CONFIG_EPOLL */
 	struct address_space	*f_mapping;
 #ifdef CONFIG_DEBUG_WRITECOUNT

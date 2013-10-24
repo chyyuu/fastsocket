@@ -18,11 +18,16 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/wait.h>
-
+#include <linux/cpu.h>
 #include <net/inet_connection_sock.h>
 #include <net/inet_hashtables.h>
 #include <net/secure_seq.h>
 #include <net/ip.h>
+
+#include <linux/log2.h>
+
+//#define DPRINTK(klevel, fmt, args...) printk(KERN_##klevel "[Hydra Channel]" " [CPU%d] %s:%d\t" fmt, smp_processor_id(), __FUNCTION__ , __LINE__, ## args)
+#define DPRINTK(klevel, fmt, args...) 
 
 /*
  * Allocate and initialize a new local port bind bucket.
@@ -151,6 +156,10 @@ static inline int compute_score(struct sock *sk, struct net *net,
 	int score = -1;
 	struct inet_sock *inet = inet_sk(sk);
 
+	//XIAOFENG6
+	int processor_id = smp_processor_id();
+	//XIAOFENG6
+
 	if (net_eq(sock_net(sk), net) && inet->num == hnum &&
 			!ipv6_only_sock(sk)) {
 		__be32 rcv_saddr = inet->rcv_saddr;
@@ -165,9 +174,91 @@ static inline int compute_score(struct sock *sk, struct net *net,
 				return -1;
 			score += 2;
 		}
+
+		//XIAOFENG6
+		if (sk->cpumask == 0)
+			score++;
+
+		//FIXME: Each Socket should bound to one single CPU
+		if (sk->cpumask & (1 << processor_id))
+			score += 2;
+		//XIAOFENG6
 	}
 	return score;
 }
+
+static struct sock * __inet_lookup_local_listener(struct net *net, 
+					   struct inet_hashinfo *hashinfo,
+					   const __be32 daddr, const unsigned short hum,
+					   const int dif)
+{
+	int score = 0, hiscore = 0;
+	struct sock *sk, *result;
+	struct hlist_nulls_node *node;
+	unsigned int hash = inet_lhashfn_ex(net, daddr, hum);
+	struct inet_listen_hash_chunk *lis_chunk = per_cpu_ptr(hashinfo->local_listening_hash, smp_processor_id());
+	struct inet_listen_hashbucket *ilb = &lis_chunk->listening_hash[hash];
+	
+	result = NULL;
+	hiscore = -1;
+
+begin:	
+	//sk_nulls_for_each_rcu(sk, node, &ilb->head) {
+	sk_nulls_for_each(sk, node, &ilb->head) {
+		score = compute_score(sk, net, hum, daddr, dif);
+		if (score > hiscore) {
+			result = sk;
+			hiscore = score;
+		}
+	}
+
+	/*
+	 * if the nulls value we got at the end of this lookup is
+	 * not the expected one, we must restart lookup.
+	 * We probably met an item that was moved to another chain.
+	 */
+	if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
+		goto begin;
+	if (result) {
+		if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
+			result = NULL;
+		else if (unlikely(compute_score(result, net, hum, daddr,
+				  dif) < hiscore)) {
+			sock_put(result);
+			goto begin;
+		}
+	} else {
+		hash = inet_lhashfn_ex(net, 0, hum);
+		ilb = &lis_chunk->listening_hash[hash];
+begin1:
+		result = NULL;
+		hiscore = -1;
+		
+		//sk_nulls_for_each_rcu(sk, node, &ilb->head) {
+		sk_nulls_for_each(sk, node, &ilb->head) {
+			score = compute_score(sk, net, hum, daddr, dif);
+			if (score > hiscore) {
+				result = sk;
+				hiscore = score;
+			}
+		}
+		if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
+			goto begin1;
+
+		if (result) {
+			if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
+				result = NULL;
+			else if (unlikely(compute_score(result, net, hum, daddr,
+					  dif) < hiscore)) {
+				sock_put(result);
+				goto begin1;
+			}
+		}
+	}
+
+	return result;
+}
+
 
 /*
  * Don't inline this cruft. Here are some nice properties to exploit here. The
@@ -184,9 +275,15 @@ struct sock *__inet_lookup_listener(struct net *net,
 {
 	struct sock *sk, *result;
 	struct hlist_nulls_node *node;
-	unsigned int hash = inet_lhashfn(net, hnum);
+	unsigned int hash = inet_lhashfn_ex(net, daddr, hnum);
 	struct inet_listen_hashbucket *ilb = &hashinfo->listening_hash[hash];
 	int score, hiscore;
+
+	
+	result = __inet_lookup_local_listener(net, hashinfo, daddr, hnum, dif);
+	if (result) {
+		return result;
+	}
 
 	rcu_read_lock();
 begin:
@@ -213,6 +310,33 @@ begin:
 				  dif) < hiscore)) {
 			sock_put(result);
 			goto begin;
+		}
+	} else {
+		
+		hash = inet_lhashfn_ex(net, 0, hnum);
+		ilb = &hashinfo->listening_hash[hash];
+begin1:
+		result = NULL;
+		hiscore = -1;
+		
+		sk_nulls_for_each_rcu(sk, node, &ilb->head) {
+			score = compute_score(sk, net, hnum, daddr, dif);
+			if (score > hiscore) {
+				result = sk;
+				hiscore = score;
+			}
+		}
+		if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
+			goto begin1;
+
+		if (result) {
+			if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
+				result = NULL;
+			else if (unlikely(compute_score(result, net, hnum, daddr,
+					  dif) < hiscore)) {
+				sock_put(result);
+				goto begin1;
+			}
 		}
 	}
 	rcu_read_unlock();
@@ -395,19 +519,43 @@ static void __inet_hash(struct sock *sk)
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
 	struct inet_listen_hashbucket *ilb;
+	int hash = 0;
 
 	if (sk->sk_state != TCP_LISTEN) {
 		__inet_hash_nolisten(sk);
 		return;
 	}
 
-	WARN_ON(!sk_unhashed(sk));
-	ilb = &hashinfo->listening_hash[inet_sk_listen_hashfn(sk)];
+	hash = inet_sk_listen_hashfn(sk);
+	if (sk->cpumask == 0) {
+		WARN_ON(!sk_unhashed(sk));
+		ilb = &hashinfo->listening_hash[hash];
 
-	spin_lock(&ilb->lock);
-	__sk_nulls_add_node_rcu(sk, &ilb->head);
-	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
-	spin_unlock(&ilb->lock);
+		spin_lock(&ilb->lock);
+		__sk_nulls_add_node_rcu(sk, &ilb->head);
+		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
+		spin_unlock(&ilb->lock);
+	} else {
+		/*
+ 		 *  add to local listening hashtable 
+  		 */
+		struct inet_listen_hash_chunk *lis_hash_chk = NULL;
+		int cpuid = 0, i = 0;
+
+		for_each_possible_cpu(i) {
+			if (sk->cpumask &  (1<<i))
+				break;
+		}
+		cpuid = i;
+		
+		lis_hash_chk = per_cpu_ptr(hashinfo->local_listening_hash, cpuid);	
+		ilb = &lis_hash_chk->listening_hash[hash];
+		
+		spin_lock(&ilb->lock);
+		__sk_nulls_add_node_rcu(sk, &ilb->head);
+		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
+		spin_unlock(&ilb->lock);
+	}
 }
 
 void inet_hash(struct sock *sk)
@@ -429,8 +577,28 @@ void inet_unhash(struct sock *sk)
 	if (sk_unhashed(sk))
 		return;
 
-	if (sk->sk_state == TCP_LISTEN)
-		lock = &hashinfo->listening_hash[inet_sk_listen_hashfn(sk)].lock;
+	if (sk->sk_state == TCP_LISTEN) {
+		int hash = inet_sk_listen_hashfn(sk);
+		if (sk->cpumask == 0) {
+			lock = &hashinfo->listening_hash[hash].lock;
+		} else {
+			struct inet_listen_hashbucket *ilh = NULL;
+			struct inet_listen_hash_chunk *lis_hash_chk;
+			int cpuid = 0, i = 0;
+
+			for_each_possible_cpu(i) {
+				if (sk->cpumask &  (1<<i))
+					break;
+			}
+			cpuid = i;
+				
+			//printk(KERN_INFO"inet_unhash:cpuid=%d\n", cpuid);
+			lis_hash_chk = per_cpu_ptr(hashinfo->local_listening_hash, cpuid);
+			
+			ilh = &lis_hash_chk->listening_hash[hash];
+			lock = &ilh->lock;
+		}
+	}
 	else
 		lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
 
@@ -441,6 +609,7 @@ void inet_unhash(struct sock *sk)
 	spin_unlock_bh(lock);
 }
 EXPORT_SYMBOL_GPL(inet_unhash);
+
 
 int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 		struct sock *sk, u32 port_offset,
@@ -560,11 +729,27 @@ void inet_hashinfo_init(struct inet_hashinfo *h)
 	int i;
 
 	atomic_set(&h->bsockets, 0);
+	h->local_listening_hash = alloc_percpu(struct inet_listen_hash_chunk);
+
+	/*
+ 	 * Initialise local listening hash 
+ 	 */
+	for_each_possible_cpu(i) {
+		struct inet_listen_hash_chunk *chk = per_cpu_ptr(h->local_listening_hash, i);
+		
+		int k = 0;
+		for (k = 0; k < INET_LHTABLE_SIZE; k++) {
+			spin_lock_init(&chk->listening_hash[k].lock);
+			INIT_HLIST_NULLS_HEAD(&chk->listening_hash[k].head,
+					      k + LISTENING_NULLS_BASE);
+		}
+	}
+
 	for (i = 0; i < INET_LHTABLE_SIZE; i++) {
 		spin_lock_init(&h->listening_hash[i].lock);
 		INIT_HLIST_NULLS_HEAD(&h->listening_hash[i].head,
 				      i + LISTENING_NULLS_BASE);
-		}
+	}
 }
 
 EXPORT_SYMBOL_GPL(inet_hashinfo_init);

@@ -83,6 +83,9 @@
  * a better scalability.
  */
 
+//XIAOFENG6
+#if 0
+
 /* Epoll private bits inside the event mask */
 #define EP_PRIVATE_BITS (EPOLLONESHOT | EPOLLET)
 
@@ -97,6 +100,7 @@
 #define EP_UNACTIVE_PTR ((void *) -1L)
 
 #define EP_ITEM_COST (sizeof(struct epitem) + sizeof(struct eppoll_entry))
+
 
 struct epoll_filefd {
 	struct file *file;
@@ -228,11 +232,16 @@ struct ep_send_events_data {
 	struct epoll_event __user *events;
 };
 
+#endif
+//XIAOFENG6
+
 /*
  * Configuration options available inside /proc/sys/fs/epoll/
  */
 /* Maximum number of epoll watched descriptors, per user */
-static int max_user_watches __read_mostly;
+int max_user_watches __read_mostly;
+
+EXPORT_SYMBOL(max_user_watches);
 
 /*
  * This mutex is used to serialize ep_free() and eventpoll_release_file().
@@ -249,7 +258,13 @@ static struct nested_calls poll_safewake_ncalls;
 static struct nested_calls poll_readywalk_ncalls;
 
 /* Slab cache used to allocate "struct epitem" */
-static struct kmem_cache *epi_cache __read_mostly;
+
+//XIAOFENG6
+//static struct kmem_cache *epi_cache __read_mostly;
+struct kmem_cache *epi_cache __read_mostly;
+
+EXPORT_SYMBOL(epi_cache);
+//XIAOFENG6
 
 /* Slab cache used to allocate "struct eppoll_entry" */
 static struct kmem_cache *pwq_cache __read_mostly;
@@ -273,6 +288,9 @@ ctl_table epoll_table[] = {
 };
 #endif /* CONFIG_SYSCTL */
 
+//XIAOFENG6
+
+#if 0
 
 /* Setup the structure that is used as key for the RB tree */
 static inline void ep_set_ffd(struct epoll_filefd *ffd,
@@ -313,6 +331,8 @@ static inline int ep_op_has_event(int op)
 {
 	return op != EPOLL_CTL_DEL;
 }
+
+#endif
 
 /* Initialize the poll safe wake up structure */
 static void ep_nested_calls_init(struct nested_calls *ncalls)
@@ -420,22 +440,22 @@ static int ep_poll_wakeup_proc(void *priv, void *cookie, int call_nests)
  * enable to have a hierarchy of epoll file descriptor of no more than
  * EP_MAX_NESTS deep.
  */
-static void ep_poll_safewake(wait_queue_head_t *wq)
+void ep_poll_safewake(wait_queue_head_t *wq)
 {
 	int this_cpu = get_cpu();
 
 	ep_call_nested(&poll_safewake_ncalls, EP_MAX_NESTS,
 		       ep_poll_wakeup_proc, NULL, wq, (void *) (long) this_cpu);
-
 	put_cpu();
 }
+EXPORT_SYMBOL(ep_poll_safewake);
 
 /*
  * This function unregisters poll callbacks from the associated file
  * descriptor.  Must be called with "mtx" held (or "epmutex" if called from
  * ep_free).
  */
-static void ep_unregister_pollwait(struct eventpoll *ep, struct epitem *epi)
+void ep_unregister_pollwait(struct eventpoll *ep, struct epitem *epi)
 {
 	struct list_head *lsthead = &epi->pwqlist;
 	struct eppoll_entry *pwq;
@@ -448,6 +468,8 @@ static void ep_unregister_pollwait(struct eventpoll *ep, struct epitem *epi)
 		kmem_cache_free(pwq_cache, pwq);
 	}
 }
+
+EXPORT_SYMBOL(ep_unregister_pollwait);
 
 /**
  * ep_scan_ready_list - Scans the ready list in a way that makes possible for
@@ -548,14 +570,10 @@ static int ep_scan_ready_list(struct eventpoll *ep,
  * Removes a "struct epitem" from the eventpoll RB tree and deallocates
  * all the associated resources. Must be called with "mtx" held.
  */
-static int ep_remove(struct eventpoll *ep, struct epitem *epi)
+int ep_remove(struct eventpoll *ep, struct epitem *epi)
 {
 	unsigned long flags;
 	struct file *file = epi->ffd.file;
-
-	//XIAOFENG6
-	file->epoll_item = NULL;
-	//XIAOFENG6
 
 	/*
 	 * Removes poll wait queue hooks. We _have_ to do this without holding
@@ -588,7 +606,9 @@ static int ep_remove(struct eventpoll *ep, struct epitem *epi)
 	return 0;
 }
 
-static void ep_free(struct eventpoll *ep)
+EXPORT_SYMBOL(ep_remove);
+
+void ep_free(struct eventpoll *ep)
 {
 	struct rb_node *rbp;
 	struct epitem *epi;
@@ -632,6 +652,8 @@ static void ep_free(struct eventpoll *ep)
 	free_uid(ep->user);
 	kfree(ep);
 }
+
+EXPORT_SYMBOL(ep_free);
 
 static int ep_eventpoll_release(struct inode *inode, struct file *file)
 {
@@ -743,7 +765,7 @@ void eventpoll_release_file(struct file *file)
 
 EXPORT_SYMBOL(eventpoll_release_file);
 
-static int ep_alloc(struct eventpoll **pep)
+int ep_alloc(struct eventpoll **pep)
 {
 	int error;
 	struct user_struct *user;
@@ -773,12 +795,14 @@ free_uid:
 	return error;
 }
 
+EXPORT_SYMBOL(ep_alloc);
+
 /*
  * Search the file inside the eventpoll tree. The RB tree operations
  * are protected by the "mtx" mutex, and ep_find() must be called with
  * "mtx" held.
  */
-static struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd)
+struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd)
 {
 	int kcmp;
 	struct rb_node *rbp;
@@ -801,6 +825,7 @@ static struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd)
 
 	return epir;
 }
+EXPORT_SYMBOL(ep_find);
 
 /*
  * This is the callback that is passed to the wait queue wakeup
@@ -875,7 +900,7 @@ out_unlock:
  * This is the callback that is used to add our wait queue to the
  * target file wakeup lists.
  */
-static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
+void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 				 poll_table *pt)
 {
 	struct epitem *epi = ep_item_from_epqueue(pt);
@@ -898,7 +923,9 @@ static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 	}
 }
 
-static void ep_rbtree_insert(struct eventpoll *ep, struct epitem *epi)
+EXPORT_SYMBOL(ep_ptable_queue_proc);
+
+void ep_rbtree_insert(struct eventpoll *ep, struct epitem *epi)
 {
 	int kcmp;
 	struct rb_node **p = &ep->rbr.rb_node, *parent = NULL;
@@ -917,10 +944,12 @@ static void ep_rbtree_insert(struct eventpoll *ep, struct epitem *epi)
 	rb_insert_color(&epi->rbn, &ep->rbr);
 }
 
+EXPORT_SYMBOL(ep_rbtree_insert);
+
 /*
  * Must be called with "mtx" held.
  */
-static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
+int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 		     struct file *tfile, int fd)
 {
 	int error, revents, pwake = 0;
@@ -943,12 +972,6 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	epi->event = *event;
 	epi->nwait = 0;
 	epi->next = EP_UNACTIVE_PTR;
-
-	//XIAOFENG6
-	/* save epitem in file struct */
-	if (tfile->f_mode & FMODE_FASTSOCKET)
-		tfile->epoll_item = epi;
-	//XIAOFENG6
 
 	/* Initialize the poll table using the queue callback */
 	epq.epi = epi;
@@ -1023,10 +1046,6 @@ error_unregister:
 
 	kmem_cache_free(epi_cache, epi);
 
-	//XIAOFENG6
-	tfile->epoll_item = NULL;
-	//XIAOFENG6
-
 	return error;
 }
 
@@ -1034,7 +1053,7 @@ error_unregister:
  * Modify the interest event mask by dropping an event if the new mask
  * has a match in the current file status. Must be called with "mtx" held.
  */
-static int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event)
+int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event)
 {
 	int pwake = 0;
 	unsigned int revents;
@@ -1148,7 +1167,7 @@ static int ep_send_events(struct eventpoll *ep,
 	return ep_scan_ready_list(ep, ep_send_events_proc, &esed);
 }
 
-static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
+int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
 		   int maxevents, long timeout)
 {
 	int res, eavail;
@@ -1216,6 +1235,8 @@ retry:
 
 	return res;
 }
+
+EXPORT_SYMBOL(ep_poll);
 
 /**
  * ep_loop_check_proc - Callback function to be passed to the @ep_call_nested()
@@ -1304,6 +1325,8 @@ SYSCALL_DEFINE1(epoll_create1, int, flags)
 	return error;
 }
 
+EXPORT_SYMBOL(sys_epoll_create1);
+
 SYSCALL_DEFINE1(epoll_create, int, size)
 {
 	if (size <= 0)
@@ -1389,20 +1412,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	 * above, we can be sure to be able to use the item looked up by
 	 * ep_find() till we release the mutex.
 	 */
-
-	//XIAOFENG6
-	//epi = ep_find(ep, tfile, fd);
-	if (tfile->f_mode & FMODE_FASTSOCKET) {
-		struct socket *sock = (struct socket *)tfile->private_data;
-
-		if (unlikely(sock->sk->sk_state == TCP_LISTEN))
-			epi = ep_find(ep, tfile, fd);
-		else
-			epi = tfile->epoll_item;
-	}
-	else
-		epi = ep_find(ep, tfile, fd);
-	//XIAOFENG6
+	epi = ep_find(ep, tfile, fd);
 
 	error = -EINVAL;
 	switch (op) {
@@ -1440,6 +1450,8 @@ error_return:
 
 	return error;
 }
+
+EXPORT_SYMBOL(sys_epoll_ctl);
 
 /*
  * Implement the event wait interface for the eventpoll file. It is the kernel

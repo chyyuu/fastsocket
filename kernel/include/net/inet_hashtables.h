@@ -25,6 +25,7 @@
 #include <linux/types.h>
 #include <linux/wait.h>
 #include <linux/vmalloc.h>
+#include <linux/jhash.h>
 
 #include <net/inet_connection_sock.h>
 #include <net/inet_sock.h>
@@ -98,7 +99,9 @@ static inline struct net *ib_net(struct inet_bind_bucket *ib)
 struct inet_bind_hashbucket {
 	spinlock_t		lock;
 	struct hlist_head	chain;
-};
+//XIAOFENG6
+}____cacheline_aligned_in_smp;
+//XIAOFENG6
 
 /*
  * Sockets can be hashed in established or listening table
@@ -113,7 +116,12 @@ struct inet_listen_hashbucket {
 };
 
 /* This is for listening sockets, thus all sockets which possess wildcards. */
-#define INET_LHTABLE_SIZE	32	/* Yes, really, this is all you need. */
+#define INET_LHTABLE_SIZE	256	/* Yes, really, this is all you need. */
+
+struct inet_listen_hash_chunk {
+	struct inet_listen_hashbucket  listening_hash[INET_LHTABLE_SIZE]
+					____cacheline_aligned_in_smp;
+};
 
 struct inet_hashinfo {
 	/* This is for sockets with full identity only.  Sockets here will
@@ -150,7 +158,7 @@ struct inet_hashinfo {
 	 */
 	struct inet_listen_hashbucket	listening_hash[INET_LHTABLE_SIZE]
 					____cacheline_aligned_in_smp;
-
+	struct inet_listen_hash_chunk  __percpu *local_listening_hash;
 	atomic_t			bsockets;
 };
 
@@ -239,9 +247,16 @@ static inline int inet_lhashfn(struct net *net, const unsigned short num)
 	return (num + net_hash_mix(net)) & (INET_LHTABLE_SIZE - 1);
 }
 
+static inline int inet_lhashfn_ex(struct net *net, const unsigned int addr, 
+				   const unsigned short num)
+{
+	//return jhash_2words(addr, num, net_hash_mix(net)) & (INET_LHTABLE_SIZE -1);
+	return (addr>>24|num) & (INET_LHTABLE_SIZE -1);
+}
+
 static inline int inet_sk_listen_hashfn(const struct sock *sk)
 {
-	return inet_lhashfn(sock_net(sk), inet_sk(sk)->num);
+	return inet_lhashfn_ex(sock_net(sk), inet_sk(sk)->rcv_saddr, inet_sk(sk)->num);
 }
 
 /* Caller must disable local BH processing. */
