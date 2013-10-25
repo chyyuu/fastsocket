@@ -185,6 +185,17 @@ struct neighbour;
 struct neigh_parms;
 struct sk_buff;
 
+//XIAOFENG6
+struct netif_steer_stats
+{
+	unsigned long pass;
+	unsigned long steer;
+	unsigned long steer_done;
+	unsigned long steer_save;
+	unsigned long steer_err;
+};
+//XIAOFENG6
+
 struct netif_rx_stats
 {
 	unsigned total;

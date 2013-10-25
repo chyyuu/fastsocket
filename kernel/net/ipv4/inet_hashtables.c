@@ -624,19 +624,59 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 	int ret;
 	struct net *net = sock_net(sk);
 
+	//XIAOFENG6
+	int cpu = smp_processor_id();
+	//FIXME: CPU hot plug 
+	int cpu_num = num_active_cpus();
+	int round_cpu_num;
+
+	unsigned int mask;
+		
+	round_cpu_num = cpu_num;
+
+	if (!is_power_of_2(cpu_num))
+		round_cpu_num = roundup_pow_of_two(cpu_num);
+
+	mask = ~(round_cpu_num - 1);
+
+	DPRINTK(INFO, "Total cpu num: %d - Round cpu num: %d - cpu mask : %x - Current cpu: %d\n", cpu_num, round_cpu_num, mask, cpu);
+
+	//XIAOFENG6
+
 	if (!snum) {
 		int i, remaining, low, high, port;
 		static u32 hint;
-		u32 offset = hint + port_offset;
+		//XIAOFENG6
+		//u32 offset = hint + port_offset;
+		u32 offset = hint + (port_offset & mask);
+		//XIAOFENG6
 		struct hlist_node *node;
 		struct inet_timewait_sock *tw = NULL;
 
+		//XIAOFENG6
+		DPRINTK(INFO, "Hint: %u - base offset: %u - new offset: %u\n", 
+			hint, port_offset, offset);
+
 		inet_get_local_port_range(&low, &high);
-		remaining = (high - low) + 1;
+
+		low &= mask;
+		high &= mask;
+
+		//remaining = (high - low) + 1;
+		remaining = high - low;
+		//XIAOFENG6
+
+		DPRINTK(INFO, "Port pool:%d [%d - %d]\n", remaining, low, high);
 
 		local_bh_disable();
-		for (i = 1; i <= remaining; i++) {
-			port = low + (i + offset) % remaining;
+		//XIAOFENG6
+		//for (i = 1; i <= remaining; i++) {
+		for (i = 0; i <= remaining; i = i + round_cpu_num) {
+			//port = low + (i + offset) % remaining;
+			port = low + (i + offset + cpu) % remaining;
+			
+			DPRINTK(INFO, "Target port %d\n", port);
+		//XIAOFENG6
 			if (inet_is_reserved_local_port(port))
 				continue;
 			head = &hinfo->bhash[inet_bhashfn(net, port,
@@ -676,7 +716,11 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 		return -EADDRNOTAVAIL;
 
 ok:
-		hint += i;
+		//XIAOFENG6
+		//hint += i;
+		hint += (i + 1) * round_cpu_num;
+		DPRINTK(INFO, "Port selected:%u - hint updated: %u\n", port, hint);
+		//XIAOFENG6
 
 		/* Head lock still held and bh's disabled */
 		inet_bind_hash(sk, tb, port);

@@ -135,6 +135,15 @@
 
 #include "net-sysfs.h"
 
+//XIAOFENG6
+#include <linux/log2.h>
+#include <net/inet_hashtables.h>
+#include <net/tcp.h>
+
+//#define DPRINTK(klevel, fmt, args...) printk(KERN_##klevel "[Hydra Channel]" " [CPU%d] %s:%d\t" fmt, smp_processor_id(), __FUNCTION__ , __LINE__, ## args)
+#define DPRINTK(klevel, fmt, args...) 
+//XIAOFENG6
+
 /* Instead of increasing this, you should create a hash table. */
 #define MAX_GRO_SKBS 8
 
@@ -2830,6 +2839,125 @@ out:
 	return ret;
 }
 
+//XIAOFENG6
+static DEFINE_PER_CPU(struct netif_steer_stats, steer_stats);
+
+static int netif_steer_cpu(unsigned short dport)	
+{
+	int cur_cpu = smp_processor_id();
+	int cpu_num = num_active_cpus();
+	int new_cpu;
+	int round_cpu_num;
+
+	unsigned int mask;
+
+	__get_cpu_var(steer_stats).steer++;
+
+	round_cpu_num = cpu_num;
+
+	if (!is_power_of_2(cpu_num))
+		round_cpu_num = roundup_pow_of_two(cpu_num);
+
+	mask = round_cpu_num - 1;
+
+	new_cpu = dport & mask;
+
+	if (new_cpu >= cpu_num)
+	{
+		DPRINTK(ERR, "masked destination port [%d]beyond local CPU mask [%d-%d]\n", 
+			new_cpu, cpu_num, round_cpu_num);
+
+		__get_cpu_var(steer_stats).steer_err++;
+
+		return -1;
+	}
+	if (new_cpu == cur_cpu)
+	{
+		DPRINTK(INFO, "God helps, packet match local CPU, no need to steer\n");
+		__get_cpu_var(steer_stats).steer_save++;
+
+		return -1;
+	}
+
+	DPRINTK(INFO, "Packet id steered to CPU %d\n", new_cpu);
+
+	__get_cpu_var(steer_stats).steer_done++;
+
+	return new_cpu;
+}
+
+static int netif_steer_skb(struct sk_buff *skb)
+{
+	if (skb->protocol == htons(ETH_P_IP))
+	{
+	    struct iphdr *iph;
+	    int iphl;
+
+	    if (pskb_may_pull(skb, sizeof(*iph)))
+	    {
+		u8 ip_proto;
+
+		iph = (struct iphdr *) skb->data;
+		ip_proto = iph->protocol;
+		iphl = iph->ihl;
+
+		if (ip_proto == IPPROTO_TCP)
+		{
+		    struct tcphdr *th;
+
+		    if (pskb_may_pull(skb, (iphl * 4) + sizeof(*th)))
+		    {
+			struct sock *sk;
+
+			th = (struct tcphdr *)(skb->data + (iphl * 4));
+
+			DPRINTK(INFO, "Incoming packet %u.%u.%u.%u:%u - %u.%u.%u.%u:%u", 
+				NIPQUAD(iph->saddr), ntohs(th->source),
+				NIPQUAD(iph->daddr), ntohs(th->dest));
+
+			if (ntohs(th->source) < 1024)
+			{
+				DPRINTK(INFO, "Packet source port < 1024, indicates it's from server\n");
+
+				return netif_steer_cpu(ntohs(th->dest));
+			}
+
+			if (ntohs(th->dest) < 1024)
+			{
+				DPRINTK(INFO, "Packet dest port < 1024, indicates it's from client\n");
+
+				__get_cpu_var(steer_stats).pass++;
+
+				return -1;
+			}
+
+			sk = __inet_lookup_listener(&init_net, &tcp_hashinfo, iph->daddr, ntohs(th->dest), skb->dev->ifindex);
+
+			if (sk)
+			{		
+				DPRINTK(INFO, "Packet match listen socket, indicates it's from client\n");
+
+				skb->sk = sk;
+				__get_cpu_var(steer_stats).pass++;
+
+				return -1;
+			}
+			else
+			//FIXME: Be more carefully to steer the packet, mis-steering can cause load imbalanced problem
+			//FIXME: Shoudl we lookup established table so make sure?
+			{
+				DPRINTK(INFO, "Packet not match listen socket, indicates it's from server\n");
+				return netif_steer_cpu(ntohs(th->dest));
+			}
+		    }
+		}
+	    }
+	}
+
+	return -1;
+}
+//XIAOFENG6
+
 /**
  *	netif_receive_skb - process receive buffer from network
  *	@skb: buffer to process
@@ -2850,7 +2978,10 @@ int netif_receive_skb(struct sk_buff *skb)
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int cpu, ret;
 
-	cpu = get_rps_cpu(skb->dev, skb, &rflow);
+	//XIAOFENG6
+	//cpu = get_rps_cpu(skb->dev, skb, &rflow);
+	cpu = netif_steer_skb(skb);
+	//XIAOFENG6
 
 	if (cpu >= 0)
 		ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
@@ -3838,6 +3969,75 @@ static const struct file_operations ptype_seq_fops = {
 	.release = seq_release_net,
 };
 
+//XIAOFENG6
+static volatile unsigned steer_cpu_id;
+
+static struct netif_steer_stats *steer_get_online(loff_t *pos)
+{
+	struct netif_steer_stats *rc = NULL;
+
+	while (*pos < nr_cpu_ids)
+		if (cpu_online(*pos)) {
+			rc = &per_cpu(steer_stats, *pos);
+			break;
+		} else
+			++*pos;
+	steer_cpu_id = *pos;
+
+	return rc;
+}
+
+static void *steer_seq_next(struct seq_file *seq, void *v, loff_t *pos)
+{
+	++*pos;
+	return steer_get_online(pos);
+}
+
+static void steer_seq_stop(struct seq_file *seq, void *v)
+{
+
+}
+
+static void *steer_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	seq_printf(seq, "%s\t%-15s%-15s%-15s%-15s%-15s\n",
+		"CPU", "Pass_total", "Steer_total", "Steer_remote", "Steer_local", "Steer_error");
+		
+	steer_cpu_id = 0;
+
+	return steer_get_online(pos);
+}
+
+static int steer_seq_show(struct seq_file *seq, void *v)
+{
+	struct netif_steer_stats *s = v;
+
+	seq_printf(seq, "%u\t%-15lu%-15lu%-15lu%-15lu%-15lu\n", 
+		steer_cpu_id, s->pass, s->steer, s->steer_done, s->steer_save, s->steer_err);
+
+	return 0;
+}
+
+static const struct seq_operations steer_seq_ops = {
+	.start = steer_seq_start,
+	.next  = steer_seq_next,
+	.stop  = steer_seq_stop,
+	.show  = steer_seq_show,
+};
+
+static int steer_seq_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &steer_seq_ops);
+}
+
+static const struct file_operations steer_seq_fops = {
+	.owner	 = THIS_MODULE,
+	.open    = steer_seq_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = seq_release,
+};
+//XIAOFENG6
 
 static int __net_init dev_proc_net_init(struct net *net)
 {
@@ -3849,12 +4049,22 @@ static int __net_init dev_proc_net_init(struct net *net)
 		goto out_dev;
 	if (!proc_net_fops_create(net, "ptype", S_IRUGO, &ptype_seq_fops))
 		goto out_softnet;
+	
+	//XIAOFENG6
+	if (!proc_net_fops_create(net, "steer_stat", S_IRUGO, &steer_seq_fops))
+		goto out_ptype;
 
 	if (wext_proc_init(net))
-		goto out_ptype;
+		//goto out_ptype;
+		goto out_steer;
+	//XIAOFENG6
 	rc = 0;
 out:
 	return rc;
+//XIAOFENG6
+out_steer:
+	proc_net_remove(net, "steer_stat");
+//XIAOFENG6
 out_ptype:
 	proc_net_remove(net, "ptype");
 out_softnet:
@@ -3868,6 +4078,7 @@ static void __net_exit dev_proc_net_exit(struct net *net)
 {
 	wext_proc_exit(net);
 
+	proc_net_remove(net, "steer_stat");
 	proc_net_remove(net, "ptype");
 	proc_net_remove(net, "softnet_stat");
 	proc_net_remove(net, "dev");
