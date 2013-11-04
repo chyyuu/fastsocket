@@ -1000,7 +1000,7 @@ static int fsocket_sk_affinity(struct socket *sock, int cpu)
 {
 	int err = 0;
 
-	sock->sk->cpumask = 1 << cpu;
+	sock->sk->cpumask = (unsigned long)1 << cpu;
 
 	DPRINTK(DEBUG, "Bind this listen socket to CPU %d with bitmap 0x%02lx\n", cpu, sock->sk->cpumask);
 

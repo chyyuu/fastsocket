@@ -180,7 +180,7 @@ static inline int compute_score(struct sock *sk, struct net *net,
 			score++;
 
 		//FIXME: Each Socket should bound to one single CPU
-		if (sk->cpumask & (1 << processor_id))
+		if (sk->cpumask & ((unsigned long)1 << processor_id))
 			score += 2;
 		//XIAOFENG6
 	}
@@ -543,7 +543,7 @@ static void __inet_hash(struct sock *sk)
 		int cpuid = 0, i = 0;
 
 		for_each_possible_cpu(i) {
-			if (sk->cpumask &  (1<<i))
+			if (sk->cpumask & ((unsigned long)1 << i))
 				break;
 		}
 		cpuid = i;
@@ -587,7 +587,7 @@ void inet_unhash(struct sock *sk)
 			int cpuid = 0, i = 0;
 
 			for_each_possible_cpu(i) {
-				if (sk->cpumask &  (1<<i))
+				if (sk->cpumask & ((unsigned long)1 << i))
 					break;
 			}
 			cpuid = i;
