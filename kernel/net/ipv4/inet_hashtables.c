@@ -27,7 +27,12 @@
 #include <linux/log2.h>
 
 //#define DPRINTK(klevel, fmt, args...) printk(KERN_##klevel "[Hydra Channel]" " [CPU%d] %s:%d\t" fmt, smp_processor_id(), __FUNCTION__ , __LINE__, ## args)
-#define DPRINTK(klevel, fmt, args...) 
+#define DPRINTK(klevel, fmt, args...)
+
+//XIAOFENG6
+DEFINE_PER_CPU(struct inet_hash_stats, hash_stats);
+EXPORT_PER_CPU_SYMBOL(hash_stats);
+//XIAOFENG6
 
 /*
  * Allocate and initialize a new local port bind bucket.
@@ -256,6 +261,11 @@ begin1:
 		}
 	}
 
+	//XIAOFENG6
+	if (result)
+		__get_cpu_var(hash_stats).local_listen_lookup++;
+	//XIAOFENG6
+
 	return result;
 }
 
@@ -340,6 +350,11 @@ begin1:
 		}
 	}
 	rcu_read_unlock();
+
+	//XIAOFENG6
+	if (result)
+		__get_cpu_var(hash_stats).global_listen_lookup++;
+	//XIAOFENG6
 	return result;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_listener);
@@ -535,6 +550,10 @@ static void __inet_hash(struct sock *sk)
 		__sk_nulls_add_node_rcu(sk, &ilb->head);
 		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 		spin_unlock(&ilb->lock);
+
+		//XIAOFENG6
+		__get_cpu_var(hash_stats).global_listen_hash++;
+		//XIAOFENG6
 	} else {
 		/*
  		 *  add to local listening hashtable 
@@ -555,6 +574,10 @@ static void __inet_hash(struct sock *sk)
 		__sk_nulls_add_node_rcu(sk, &ilb->head);
 		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 		spin_unlock(&ilb->lock);
+
+		//XIAOFENG6
+		__get_cpu_var(hash_stats).local_listen_hash++;
+		//XIAOFENG6
 	}
 }
 
@@ -581,6 +604,9 @@ void inet_unhash(struct sock *sk)
 		int hash = inet_sk_listen_hashfn(sk);
 		if (sk->cpumask == 0) {
 			lock = &hashinfo->listening_hash[hash].lock;
+			//XIAOFENG6
+			__get_cpu_var(hash_stats).global_listen_unhash++;
+			//XIAOFENG6
 		} else {
 			struct inet_listen_hashbucket *ilh = NULL;
 			struct inet_listen_hash_chunk *lis_hash_chk;
@@ -597,6 +623,9 @@ void inet_unhash(struct sock *sk)
 			
 			ilh = &lis_hash_chk->listening_hash[hash];
 			lock = &ilh->lock;
+			//XIAOFENG6
+			__get_cpu_var(hash_stats).local_listen_unhash++;
+			//XIAOFENG6
 		}
 	}
 	else
@@ -768,9 +797,124 @@ int inet_hash_connect(struct inet_timewait_death_row *death_row,
 
 EXPORT_SYMBOL_GPL(inet_hash_connect);
 
+//XIAOFENG6
+
+static volatile unsigned cpu_id;
+
+static struct inet_hash_stats *get_online(loff_t *pos)
+{
+	struct inet_hash_stats *rc = NULL;
+
+	while (*pos < nr_cpu_ids)
+		if (cpu_online(*pos)) {
+			rc = &per_cpu(hash_stats, *pos);
+			break;
+		} else
+			++*pos;
+	cpu_id = *pos;
+
+	return rc;
+}
+
+static void *hash_seq_next(struct seq_file *seq, void *v, loff_t *pos)
+{
+	++*pos;
+	return get_online(pos);
+}
+
+static void hash_seq_stop(struct seq_file *seq, void *v)
+{
+
+}
+
+static void *hash_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	seq_printf(seq, "%s\t%-15s%-15s%-15s%-15s%-15s\n",
+		"CPU", "Loc_lst_lookup", "Glo_lst_lookup", "Com_accetp", "Loc_accept", "Glo_accept");
+		
+	cpu_id = 0;
+
+	return get_online(pos);
+}
+
+static int hash_seq_show(struct seq_file *seq, void *v)
+{
+	struct inet_hash_stats *s = v;
+
+	seq_printf(seq, "%u\t%-15lu%-15lu%-15lu%-15lu%-15lu\n", 
+		cpu_id, s->local_listen_lookup, s->global_listen_lookup, s->common_accept, s->local_accept, s->global_accept);
+
+	return 0;
+}
+static const struct seq_operations hash_seq_ops = {
+	.start = hash_seq_start,
+	.next  = hash_seq_next,
+	.stop  = hash_seq_stop,
+	.show  = hash_seq_show,
+};
+
+static int hash_seq_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &hash_seq_ops);
+}
+
+ssize_t hash_reset(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu)
+		memset(&per_cpu(hash_stats, cpu), 0, sizeof(struct inet_hash_stats));
+
+	return 1;
+}
+
+static const struct file_operations hash_seq_fops = {
+	.owner	 = THIS_MODULE,
+	.open    = hash_seq_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = seq_release,
+	.write   = hash_reset,
+};
+
+static int __net_init inet_hash_proc_net_init(struct net *net)
+{	
+	int rc = -ENOMEM;
+
+	if (!proc_net_fops_create(net, "hash_stat", S_IRUGO, &hash_seq_fops))
+		goto out;
+
+	rc = 0;
+
+out:
+	return rc;
+}
+
+static void __net_exit inet_hash_proc_net_exit(struct net *net)
+{
+	proc_net_remove(net, "hash_stat");
+}
+
+
+static struct pernet_operations __net_initdata inet_hash_proc_ops = {
+	.init = inet_hash_proc_net_init,
+	.exit = inet_hash_proc_net_exit,
+};
+
+static int inet_hash_proc_init(void)
+{
+	return register_pernet_subsys(&inet_hash_proc_ops);
+}
+
+//XIAOFENG6
+
 void inet_hashinfo_init(struct inet_hashinfo *h)
 {
 	int i;
+
+	//XIAOFENG6
+	inet_hash_proc_init();
+	//XIAOFENG6
 
 	atomic_set(&h->bsockets, 0);
 	h->local_listening_hash = alloc_percpu(struct inet_listen_hash_chunk);

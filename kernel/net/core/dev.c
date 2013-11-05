@@ -3967,6 +3967,7 @@ static const struct file_operations ptype_seq_fops = {
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release_net,
+
 };
 
 //XIAOFENG6
@@ -4030,12 +4031,23 @@ static int steer_seq_open(struct inode *inode, struct file *file)
 	return seq_open(file, &steer_seq_ops);
 }
 
+ssize_t steer_reset(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu)
+		memset(&per_cpu(steer_stats, cpu), 0, sizeof(struct netif_steer_stats));
+
+	return 1;
+}
+
 static const struct file_operations steer_seq_fops = {
 	.owner	 = THIS_MODULE,
 	.open    = steer_seq_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release,
+	.write   = steer_reset,
 };
 //XIAOFENG6
 

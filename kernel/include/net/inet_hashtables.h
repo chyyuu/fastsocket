@@ -123,6 +123,24 @@ struct inet_listen_hash_chunk {
 					____cacheline_aligned_in_smp;
 };
 
+//XIAOFENG6
+struct inet_hash_stats
+{
+	unsigned long	common_accept;
+	unsigned long	local_accept;
+	unsigned long	global_accept;
+
+	unsigned long	local_listen_lookup;
+	unsigned long 	global_listen_lookup;
+
+	unsigned 	local_listen_hash;
+	unsigned	local_listen_unhash;
+
+	unsigned 	global_listen_hash;
+	unsigned	global_listen_unhash;
+};
+//XIAOFENG6
+
 struct inet_hashinfo {
 	/* This is for sockets with full identity only.  Sockets here will
 	 * always be without wildcards and will have the following invariant:

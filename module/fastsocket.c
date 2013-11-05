@@ -156,7 +156,7 @@ static char *fastsockfs_dynamic_dname(struct dentry *dentry, char *buffer, int b
 
 static char *fastsockfs_dname(struct dentry *dentry, char *buffer, int buflen)
 {
-	return fastsockfs_dynamic_dname(dentry, buffer, buflen, "fastsocket:[%lu]",
+	return fastsockfs_dynamic_dname(dentry, buffer, buflen, "socket:[%lu]",
 				dentry->d_inode->i_ino);
 }
 
@@ -1116,13 +1116,19 @@ static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 	return ret;
 }
 
+DECLARE_PER_CPU(struct inet_hash_stats, hash_stats);
+
 static inline int fsocket_common_accept(struct socket *sock, struct socket *newsock, int flags)
 {
+	__get_cpu_var(hash_stats).common_accept++;
+
 	return sock->ops->accept(sock, newsock, flags);
 }
 
 static inline int fsocket_local_accept(struct socket *sock, struct socket *newsock, int flags)
 {
+	__get_cpu_var(hash_stats).local_accept++;
+
 	return sock->ops->accept(sock, newsock, flags);
 }
 
@@ -1130,8 +1136,11 @@ static inline int fsocket_global_accept(struct socket *sock, struct socket *news
 {
 	percpu_add(global_spawn_accept, 1);
 
-	if (percpu_read(global_spawn_accept) & 0x1)
+	if (percpu_read(global_spawn_accept) & 0x1) {
+		__get_cpu_var(hash_stats).global_accept++;
+
 		return sock->ops->accept(sock, newsock, flags);
+	}
 
 	return -EAGAIN;
 }
