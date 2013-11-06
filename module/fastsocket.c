@@ -1,5 +1,3 @@
-#define pr_fmt(msg) "Fastsocket:  " msg
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -213,10 +211,7 @@ static int __fsocket_filp_close(struct file *file)
 
 	if (atomic_long_dec_and_test(&file->f_count)) {
 		
-		//fsnotify_close(file);
-
-		//fsocket_eventpoll_release_file(file);
-		eventpoll_release_file(file);
+		eventpoll_release(file);
 
 		sock = (struct socket *)file->private_data;
 		if (sock)
@@ -425,6 +420,7 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 	
 	path.dentry = fsock_d_alloc(sock, sock_mnt->mnt_sb->s_root, &name);
 	if (unlikely(!path.dentry)) {
+		printk(KERN_ERR "Allocate dentry failed\n");
 		put_unused_fd(fd);
 		return -ENOMEM;
 	}
@@ -656,22 +652,6 @@ release_sock:
 out:
 	return err;
 
-}
-
-static int fsocket_listen(struct file *f, int fd, int backlog)
-{
-	int ret = -EINVAL;
-	struct socket *sock = (struct socket *)f->private_data;
-	
-	DPRINTK(DEBUG, "Listen socket %d\n", fd);
-	if (sock != NULL) {
-		int somaxconn = sock_net(sock->sk)->core.sysctl_somaxconn;
-		if (backlog > somaxconn)
-			backlog = somaxconn;
-		ret = sock->ops->listen(sock, backlog);
-	}
-
-	return ret;
 }
 
 static int fsocket_ep_insert(struct eventpoll *ep, struct epoll_event *event, struct file *tfile, int fd)
@@ -926,41 +906,6 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 	return error;
 }
 
-static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
-{
-	struct fsocket_ioctl_arg arg;
-	struct file *f = NULL;
-	int fd;
-	int backlog = 0;
-	int ret = -1;
-	int fput_needed;
-
-	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
-		DPRINTK(ERR, "copy ioctl parameter from user space to kernel failed\n");
-		return -EFAULT;
-	}
-	
-	fd = arg.fd;
-	backlog = arg.backlog;
-
-	f = fget_light(fd, &fput_needed);
-	if (f == NULL) {
-		DPRINTK(ERR, "fd [%d] doesn't exist!\n", fd);
-		return -EINVAL;
-	}
-	
-	if (f->f_mode & FMODE_FASTSOCKET)
-		ret = fsocket_listen(f, fd, backlog);
-	else {
-		DPRINTK(WARNING, "Listen non-fastsocket %d\n", arg.fd);
-		ret = sys_listen(fd, backlog);
-	}
-	
-	fput_light(f, fput_needed);
-
-	return ret;
-}
-
 static int fsocket_process_affinity(struct socket *sock)
 {
 	int ccpu, ncpu, tcpu;
@@ -1196,8 +1141,8 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		if (!lsock) {
 			printk(KERN_ERR "No socket for sub file\n");
 			err = -EBADF;
-			fsock_release_sock(newsock);
-			goto out;
+			//fsock_release_sock(newsock);
+			goto out_fd;
 		}
 
 		if (unlikely(!reqsk_queue_empty(&icsk->icsk_accept_queue))) {
@@ -1251,90 +1196,8 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 	goto out;
 
 out_fd:
-	//FIXME: Really cause problem
-	//put_empty_filp(newfile);
-	put_unused_fd(newfd);
 	fsocket_filp_close(newfile);
-//out_sock:
-//	fsock_release_sock(newsock);
-out:
-	return err;
-}
-
-
-int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sockaddr, int __user *upeer_addrlen)
-{
-	int err = 0, newfd, len;
-
-	struct socket *sock, *newsock;
-	struct sockaddr_storage address;
-
-	struct file *newfile;
-
-	struct tcp_sock *tp;
-
-	sock = (struct socket *)file->private_data;
-
-	if (!sock) {
-		printk(KERN_ERR "No socket for file\n");
-		err = -EBADF;
-		goto out;
-	}
-
-	if (!(newsock = fsocket_alloc_socket())) {
-		printk(KERN_ERR "Allocate empty socket failed\n");
-		err = -ENOMEM;
-		goto out;
-	}
-
-	newsock->type = SOCK_STREAM;
-	newsock->ops = sock->ops;
-
-	//Make it NONBLOCK for Fastsocket by default
-	newfd = fsock_alloc_file(newsock, &newfile, O_NONBLOCK);
-	
-	if (unlikely(newfd < 0)) {
-		printk(KERN_ERR "Allocate file for new socket failed\n");
-		err = newfd;
-		fsock_release_sock(newsock);
-		goto out;
-	}
-
-	err = sock->ops->accept(sock, newsock, O_NONBLOCK);
-
-	if (err < 0)
-	{	
-		if (err != -EAGAIN)
-			printk(KERN_ERR "Accept failed [%d]\n", err);
-		goto out_fd;
-	}
-
-	if (upeer_sockaddr) {
-		if (newsock->ops->getname(newsock, (struct sockaddr *)&address, &len, 2) < 0) {
-			printk(KERN_ERR "Getname failed for accepted socket\n");
-			err = -ECONNABORTED;
-			goto out_fd;
-		}
-
-		err = move_addr_to_user((struct sockaddr *)&address, len, upeer_sockaddr, upeer_addrlen);
-
-		if (err < 0)
-			goto out_fd;
-	}
-
-
-	tp = tcp_sk(sock->sk);
-	//TODO: Default TCP OPT For Fastsocket.
-	tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
-
-	fd_install(newfd, newfile);
-	err = newfd;
-
-	goto out;
-
-out_fd:
 	put_unused_fd(newfd);
-	fsocket_filp_close(newfile);
 out:
 	return err;
 }
@@ -1430,23 +1293,6 @@ static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
 	return error;
 }
 
-static int  fastsocket_epoll_create(struct fsocket_ioctl_arg *u_arg)
-{
-       struct fsocket_ioctl_arg arg; 
-       int ret = 0;
-
-       if (copy_from_user(&arg, u_arg, sizeof(arg))) {
-	       DPRINTK(ERR, "copy ioctl parameter from user space to kernel failed\n");
-	       return -EFAULT;
-       }
-       
-       ret = sys_epoll_create1(0);
-
-       DPRINTK(DEBUG, "Create Epoll %d\n", ret);
-
-       return ret;
-}
-
 static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 {
 	struct fsocket_ioctl_arg arg;
@@ -1490,63 +1336,23 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 	return ret;
 }
 
-static int fastsocket_epoll_wait(struct fsocket_ioctl_arg *u_arg)
-{
-	struct file *ep_file;
-	struct eventpoll *ep;
-
-	struct fsocket_ioctl_arg arg;
-
-	int fput_need, ret = 0;
-
-	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
-		DPRINTK(ERR, "copy ioctl parameter from user space to kernel failed\n");
-		return -EFAULT;
-	}
-
-	ep_file = fget_light(arg.op.epoll_op.epoll_fd, &fput_need);
-	if (!ep_file)
-		return -EFAULT;
-
-	//FIXME: To do this check
-	//if (!is_file_epoll(ep_file)) {
-	//	fput_light(ep_file, fput_need);
-	//	return -EINVAL;
-	//}
-
-	ep = (struct eventpoll *)ep_file->private_data;
-	
-	ret = ep_poll(ep, arg.op.epoll_op.ev, arg.op.epoll_op.size, arg.op.epoll_op.time_out); 
-	
-	fput_light(ep_file, fput_need);
-
-	return ret;
-}
-
 static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
 	case FSOCKET_IOC_SOCKET:
 		return fastsocket_socket((struct fsocket_ioctl_arg *) arg);
-	case FSOCKET_IOC_LISTEN:
-		return fastsocket_listen((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_SPAWN:
 		return fastsocket_spawn((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_ACCEPT:
 		return fastsocket_accept((struct fsocket_ioctl_arg *)arg);
 	case FSOCKET_IOC_CLOSE:
 		return fastsocket_close((struct fsocket_ioctl_arg *) arg);
-	case FSOCKET_IOC_EPOLL:
-		return fastsocket_epoll_create((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_EPOLL_CTL:
 		return fastsocket_epoll_ctl((struct fsocket_ioctl_arg *)arg);
-	case FSOCKET_IOC_EPOLL_WAIT:
-		return fastsocket_epoll_wait((struct fsocket_ioctl_arg *)arg);
 	default:
 		DPRINTK(WARNING, "ioctl [%d] operation not support\n", cmd);
 		break;
 	}
-
 	return -EINVAL;
 }
 
