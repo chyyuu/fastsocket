@@ -487,10 +487,9 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 
 	ofile = oldsock->file;
 
-	//if (!ofile) {
-	//	DPRINTK(ERR, "NULL pointer for %d file\n", fd);
-	//	return -EINVAL;
-	//}
+	/* 
+	 * Allocate file for local spawned listen socket.
+	*/
 
 	sfile = get_empty_filp();
 	if (sfile == NULL) {
@@ -502,38 +501,34 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	DPRINTK(DEBUG, "Allocate sub listen socket file 0x%p\n", sfile);
 
 	sock = fsocket_alloc_socket();
-	
 	if (sock == NULL) {
 		printk(KERN_ERR "Allocate New Socket failed\n");
 		err = -ENOMEM;
+		put_empty_filp(sfile);
 		goto out;
 	}	
 
 	sock->type = oldsock->type;
 
 	err = inet_create(current->nsproxy->net_ns, sock, 0, 0);
-
 	if (err < 0) {
 		printk(KERN_ERR "Initialize Inet Socket failed\n");
-		goto release_sock;
+		put_empty_filp(sfile);
+		fsock_release_sock(sock);
+		goto out;
 	}
 
-	//sock_set_flag(sock->sk, SOCK_LWS);
-
 	tp = tcp_sk(sock->sk);
-	//FIXME: Default TCP OPT For Fastsocket.
+	//TODO: Default TCP OPT For Fastsocket.
 	tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
-
-	
-	//Init private sub file 
-
-	sock->file = sfile;
 
 	path.dentry = fsock_d_alloc(sock, sock_mnt->mnt_sb->s_root, &name);
 	if (unlikely(!path.dentry)) {
 		err = -ENOMEM;
 		printk(KERN_ERR "Spawn listen socket alloc dentry failed\n");
-		goto release_sock;
+		put_empty_filp(sfile);
+		fsock_release_sock(sock);
+		goto out;
 	}
 	
 	path.mnt = sock_mnt;
@@ -550,12 +545,18 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	sfile->sub_file = NULL;
 	sfile->epoll_item = NULL;
 
+	//Initialize file at last, so, release_sock can release socket inode.
+	sock->file = sfile;
 
-	//Init new listen socket file
+	/* 
+	 * Allocate file copy for global listen socket.
+	*/
+
 	nfile = get_empty_filp();
 	if (nfile == NULL) {
 		err = -ENOMEM;
 		printk(KERN_ERR "Spawn global listen socket alloc file failed\n");
+		fsocket_filp_close(sfile);
 		goto out;
 	}
 
@@ -565,7 +566,9 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	if (unlikely(!path.dentry)) {
 		err = -ENOMEM;
 		printk(KERN_ERR "Spawn listen socket alloc dentry failed\n");
-		goto release_sock;
+		put_empty_filp(nfile);
+		fsocket_filp_close(sfile);
+		goto out;
 	}
 
 	path.mnt = sock_mnt;
@@ -594,8 +597,6 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 
 	goto out;
 
-release_sock:
-	fsock_release_sock(sock);
 out:
 	return err;
 }
@@ -960,8 +961,6 @@ static int fsocket_spawn(struct file *filp, int fd, int cpu)
 
 	DPRINTK(ERR, "Listen spawn listen fd %d on CPU %d\n", fd, cpu);
 
-	//struct file *nfilp;
-	
 	if (!enable_listen_spawn) {
 		printk(KERN_ERR "Module para disable listen-spawn feature\n");
 		ret = -EPERM;
@@ -984,7 +983,6 @@ static int fsocket_spawn(struct file *filp, int fd, int cpu)
 
 	cpu = ret;
 
-	//nfd = fsocket_clone(sock, &newsock);
 	ret = fsocket_spawn_clone(fd, sock, &newsock);
 	if (ret < 0) {
 		printk(KERN_ERR "New spawn listen socket failed\n");
@@ -1373,7 +1371,6 @@ static int fsocket_release(struct inode *inode, struct file *filp)
 
 	return 0;
 }
-
 
 static const struct file_operations fastsocket_fops = {
 	.open = fsocket_open,
