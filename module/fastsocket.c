@@ -1359,6 +1359,7 @@ static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long 
 static int fsocket_open(struct inode *inode, struct file *filp)
 {
 	if (!try_module_get(THIS_MODULE)) {
+		DPRINTK(INFO, "Get fastsocket module reference\n");
 		DPRINTK(ERR, "Add reference to fastsocket module failed\n");
 		return -EINVAL;
 	}
@@ -1370,6 +1371,7 @@ static int fsocket_open(struct inode *inode, struct file *filp)
 static int fsocket_release(struct inode *inode, struct file *filp)
 {
 	module_put(filp->private_data);
+	DPRINTK(INFO, "Release fastsocket module reference\n");
 
 	return 0;
 }
