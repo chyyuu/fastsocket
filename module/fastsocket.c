@@ -34,9 +34,11 @@ MODULE_DESCRIPTION("Fast socket kernel module");
 
 static int fsocket_debug_level = 5;
 static int enable_listen_spawn = 0;
+extern int enable_receive_flow_deliver;
 
 module_param(fsocket_debug_level,int, 0);
 module_param(enable_listen_spawn, int, 0);
+module_param(enable_receive_flow_deliver, int, 0);
 
 MODULE_PARM_DESC(enable_listen_spawn, " Control listen-spawn behavior: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity");
 MODULE_PARM_DESC(fsocket_debug_level, " Debug level (0-6)");

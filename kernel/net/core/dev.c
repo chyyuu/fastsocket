@@ -2973,14 +2973,20 @@ static int netif_steer_skb(struct sk_buff *skb)
  *	NET_RX_SUCCESS: no congestion
  *	NET_RX_DROP: packet was dropped
  */
+
+int enable_receive_flow_deliver = 0;
+EXPORT_SYMBOL(enable_receive_flow_deliver);
+
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int cpu, ret;
 
 	//XIAOFENG6
-	//cpu = get_rps_cpu(skb->dev, skb, &rflow);
-	cpu = netif_steer_skb(skb);
+	if (enable_receive_flow_deliver)
+		cpu = netif_steer_skb(skb);
+	else
+		cpu = get_rps_cpu(skb->dev, skb, &rflow);
 	//XIAOFENG6
 
 	if (cpu >= 0)
@@ -2990,6 +2996,7 @@ int netif_receive_skb(struct sk_buff *skb)
 
 	return ret;
 }
+
 EXPORT_SYMBOL(netif_receive_skb);
 
 /* Network device is going away, flush any packets still pending  */
