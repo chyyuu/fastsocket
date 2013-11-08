@@ -1,7 +1,7 @@
 #!/bin/sh
 
-ethtool -K eth8 ntuple on
-ethtool -K eth9 ntuple on
+ethtool -K eth8 ntuple off
+ethtool -K eth9 ntuple off
 
 #ethtool -U eth9 flow-type tcp4 dst-port 0 m 0xFFF0  src-port 0 m 0x03ff action 0;
 #ethtool -U eth9 flow-type tcp4 dst-port 1 m 0xFFF0  src-port 0 m 0x03ff action 1;
