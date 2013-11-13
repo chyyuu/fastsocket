@@ -53,10 +53,10 @@ struct fsocket_ioctl_arg {
 		//	int sockaddr_len;
 		//}connect_op;
 
-		//struct io_op_t {
-		//	char *buf;
-		//	u32 buf_len;
-		//}io_op;
+		struct io_op_t {
+			char *buf;
+			u32 buf_len;
+		}io_op;
 
 		struct socket_op_t {
 			u32 family;

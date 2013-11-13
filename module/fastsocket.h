@@ -61,15 +61,15 @@ struct fsocket_ioctl_arg {
 			int *sockaddr_len; /* user sockaddr address len*/
 		}accept_op;
 
-		struct socket_bind_op_t {
-			void *sockaddr;
-			int sockaddr_len;
-		}bind_op;
+		//struct socket_bind_op_t {
+		//	void *sockaddr;
+		//	int sockaddr_len;
+		//}bind_op;
 
-		struct socket_connect_op_t {
-			void *sockaddr;
-			int sockaddr_len;
-		}connect_op;
+		//struct socket_connect_op_t {
+		//	void *sockaddr;
+		//	int sockaddr_len;
+		//}connect_op;
 
 		struct io_op_t {
 			char *buf;
@@ -82,13 +82,13 @@ struct fsocket_ioctl_arg {
 			u32 protocol;
 		}socket_op;
 
-		struct socket_opt_op_t {
-			u32 fd;	
-			u32 level;
-			u32 optname;
-			char * optval;
-			u32 opt_len;
-		}socket_opt_op;
+		//struct socket_opt_op_t {
+		//	u32 fd;	
+		//	u32 level;
+		//	u32 optname;
+		//	char * optval;
+		//	u32 opt_len;
+		//}socket_opt_op;
 
 		struct epoll_op_t {
 			u32 epoll_fd;

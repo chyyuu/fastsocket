@@ -517,7 +517,7 @@ LIB_EBTREE = $(EBTREE_DIR)/libebtree.a
 haproxy: src/haproxy.o $(OBJS) $(OPTIONS_OBJS) $(EBTREE_OBJS)
 	$(CC) -c -g libsocket.c
 	$(AR) -r libsocket.a libsocket.o
-	$(LD)  -Wl,-wrap,socket -Wl,-wrap,close -Wl,-wrap,accept -Wl,-wrap,listen -Wl,-wrap,epoll_ctl $(LDFLAGS) -o $@ $^ $(LDOPTS)
+	$(LD)  -Wl,-wrap,socket -Wl,-wrap,close -Wl,-wrap,accept -Wl,-wrap,listen -Wl,-wrap,read -Wl,-wrap,write -Wl,-wrap,epoll_ctl $(LDFLAGS) -o $@ $^ $(LDOPTS)
 
 acl_file_verify: $(OBJS) $(OPTIONS_OBJS) $(EBTREE_OBJS) src/acl_file_verify.o
 	$(LD) $(LDFLAGS) -o $@ $^ $(LDOPTS)

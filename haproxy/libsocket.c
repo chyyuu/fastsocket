@@ -161,48 +161,48 @@ int SYSCALL_DEFINE(close, int fd)
 	return ret;
 }
 
-//int SYSCALL_DEFINE(write, int fd, char *buf, int buf_len)
-//{
-//	int ret;
-//	struct fsocket_ioctl_arg arg;
-//
-//	if (fsocket_channel_fd != 0) {
-//		arg.fd = fd;
-//		arg.op.io_op.buf = buf;
-//		arg.op.io_op.buf_len = buf_len;
-//
-//		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_WRITE, &arg);
-//		if (ret < 0) {
-//			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Write failed!\n");
-//		}
-//	} else {
-//		ret = SYSCALL(write, buf, buf_len);
-//	}
-//
-//	return ret;
-//}
-//
-//
-//int SYSCALL_DEFINE(read, int fd, char *buf, int buf_len)
-//{
-//	int ret;
-//	struct fsocket_ioctl_arg arg;
-//
-//	if (fsocket_channel_fd != 0) {
-//		arg.fd = fd;
-//		arg.op.io_op.buf = buf;
-//		arg.op.io_op.buf_len = buf_len;
-//
-//		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_READ, &arg);
-//		if (ret < 0) {
-//			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Read failed!\n");
-//		}
-//	} else {
-//		ret = SYSCALL(read, buf, buf_len);
-//	}
-//
-//	return ret;
-//}
+int SYSCALL_DEFINE(write, int fd, char *buf, int buf_len)
+{
+	int ret;
+	struct fsocket_ioctl_arg arg;
+
+	if (fsocket_channel_fd != 0) {
+		arg.fd = fd;
+		arg.op.io_op.buf = buf;
+		arg.op.io_op.buf_len = buf_len;
+
+		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_WRITE, &arg);
+		if (ret < 0) {
+			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Write failed!\n");
+		}
+	} else {
+		ret = SYSCALL(write, buf, buf_len);
+	}
+
+	return ret;
+}
+
+
+int SYSCALL_DEFINE(read, int fd, char *buf, int buf_len)
+{
+	int ret;
+	struct fsocket_ioctl_arg arg;
+
+	if (fsocket_channel_fd != 0) {
+		arg.fd = fd;
+		arg.op.io_op.buf = buf;
+		arg.op.io_op.buf_len = buf_len;
+
+		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_READ, &arg);
+		if (ret < 0) {
+			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Read failed!\n");
+		}
+	} else {
+		ret = SYSCALL(read, buf, buf_len);
+	}
+
+	return ret;
+}
 
 int SYSCALL_DEFINE(epoll_ctl, int efd, int cmd, int fd, struct epoll_event *ev)
 {
