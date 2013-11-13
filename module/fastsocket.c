@@ -62,13 +62,35 @@ static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
 
 static void fastsock_destroy_inode(struct inode *inode)
 {
+	DPRINTK(DEBUG, "Free inode 0x%p\n", inode);
 	kmem_cache_free(socket_cachep, container_of(inode, struct socket_alloc, vfs_inode));
 
 	percpu_sub(fastsockets_in_use, 1);
 }
 
+static struct inode *fastsock_alloc_inode(struct super_block *sb)
+{
+	struct fsocket_alloc *ei;
+
+	ei = kmem_cache_alloc(socket_cachep, GFP_KERNEL);
+	if (!ei)
+		return NULL;
+	init_waitqueue_head(&ei->socket.wait);
+
+	ei->socket.fasync_list = NULL;
+	ei->socket.state = SS_UNCONNECTED;
+	ei->socket.flags = 0;
+	ei->socket.ops = NULL;
+	ei->socket.sk = NULL;
+	ei->socket.file = NULL;
+
+	DPRINTK(ERR, "Allocate inode 0x%p\n", &ei->vfs_inode);
+
+	return &ei->vfs_inode;
+}
+
 static const struct super_operations fastsockfs_ops = {
-	//.alloc_inode = fastsock_alloc_inode;
+	.alloc_inode = fastsock_alloc_inode,
 	.destroy_inode = fastsock_destroy_inode,
 	.statfs = simple_statfs,
 };
@@ -420,6 +442,11 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 
 	//Initialize path
 	
+	if (sock_mnt->mnt_sb && sock_mnt->mnt_sb->s_root)
+		DPRINTK(DEBUG, "Nice");
+	else
+		DPRINTK(DEBUG, "Bad!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+	
 	path.dentry = fsock_d_alloc(sock, sock_mnt->mnt_sb->s_root, &name);
 	if (unlikely(!path.dentry)) {
 		printk(KERN_ERR "Allocate dentry failed\n");
@@ -524,6 +551,11 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	//TODO: Default TCP OPT For Fastsocket.
 	tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
 
+	if (sock_mnt->mnt_sb && sock_mnt->mnt_sb->s_root)
+		DPRINTK(DEBUG, "Nice");
+	else
+		DPRINTK(DEBUG, "Bad!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+
 	path.dentry = fsock_d_alloc(sock, sock_mnt->mnt_sb->s_root, &name);
 	if (unlikely(!path.dentry)) {
 		err = -ENOMEM;
@@ -563,6 +595,11 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	}
 
 	DPRINTK(DEBUG, "Allocate new listen socket file 0x%p\n", nfile);
+
+	if (sock_mnt->mnt_sb && sock_mnt->mnt_sb->s_root)
+		DPRINTK(DEBUG, "Nice");
+	else
+		DPRINTK(DEBUG, "Bad!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
 
 	path.dentry = fsock_d_alloc(oldsock, sock_mnt->mnt_sb->s_root, &name);
 	if (unlikely(!path.dentry)) {
@@ -961,7 +998,7 @@ static int fsocket_spawn(struct file *filp, int fd, int cpu)
 	struct socket *sock, *newsock;
 	struct sockaddr_in addr;
 
-	DPRINTK(ERR, "Listen spawn listen fd %d on CPU %d\n", fd, cpu);
+	DPRINTK(DEBUG, "Listen spawn listen fd %d on CPU %d\n", fd, cpu);
 
 	if (!enable_listen_spawn) {
 		printk(KERN_ERR "Module para disable listen-spawn feature\n");
@@ -1167,7 +1204,7 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 	if (err < 0)
 	{	
 		//if (err != -EAGAIN)
-		//	printk(KERN_ERR "Accept failed [%d]\n", err);
+		DPRINTK(DEBUG, "Accept failed [%d]\n", err);
 		goto out_fd;
 	}
 
@@ -1256,7 +1293,7 @@ static int fastsocket_socket(struct fsocket_ioctl_arg *u_arg)
 	}
 	else { 
 		fd = sys_socket(family, type, protocol);
-		DPRINTK(WARNING, "Create non-tcp socket %d\n", fd);
+		DPRINTK(DEBUG, "Create non-tcp socket %d\n", fd);
 		return fd;
 	}
 }
@@ -1284,7 +1321,7 @@ static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
 		}
 		else {
 			fput_light(tfile, fput_need);
-			DPRINTK(WARNING, "Close non-fastsocket %d\n", arg.fd);
+			DPRINTK(DEBUG, "Close non-fastsocket %d\n", arg.fd);
 			error = sys_close(arg.fd);
 		}
 	} else 
@@ -1325,7 +1362,7 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 		ret = fsocket_epoll_ctl(ep, tfile, arg.fd, arg.op.epoll_op.ep_ctl_cmd, arg.op.epoll_op.ev);
 
 	} else {
-		DPRINTK(WARNING, "Target socket %d is Not Fastsocket\n", arg.fd);
+		DPRINTK(DEBUG, "Target socket %d is Not Fastsocket\n", arg.fd);
 		ret = sys_epoll_ctl(arg.op.epoll_op.epoll_fd, arg.op.epoll_op.ep_ctl_cmd, 
 					arg.fd, arg.op.epoll_op.ev);
 	}
@@ -1391,7 +1428,7 @@ static struct miscdevice fastsocket_dev = {
 
 static void init_once(void *foo)
 {
-	struct socket_alloc *ei = (struct socket_alloc *)foo;
+	struct fsocket_alloc *ei = (struct fsocket_alloc *)foo;
 
 	inode_init_once(&ei->vfs_inode);
 }
@@ -1407,7 +1444,7 @@ static int __init  fastsocket_init(void)
 	}
 
 	socket_cachep = kmem_cache_create("fastsocket_socket_cache", sizeof(struct fsocket_alloc), 0, 
-			SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT | SLAB_PANIC, init_once);
+			SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, init_once);
 
 	ret = register_filesystem(&fastsock_fs_type);
 	if (ret) {
@@ -1417,6 +1454,10 @@ static int __init  fastsocket_init(void)
 	}
 
 	sock_mnt = kern_mount(&fastsock_fs_type);
+
+	if (sock_mnt->mnt_sb && sock_mnt->mnt_sb->s_root)
+		DPRINTK(DEBUG, "Nice");
+
 	if (IS_ERR(sock_mnt)) {
 		DPRINTK(ERR, "Mount fastsocket filesystem failed\n");
 		ret = PTR_ERR(sock_mnt);
@@ -1433,10 +1474,11 @@ static int __init  fastsocket_init(void)
 static void __exit fastsocket_exit(void)
 {
 	misc_deregister(&fastsocket_dev);
-	kmem_cache_destroy(socket_cachep);
 
 	mntput(sock_mnt);
 	unregister_filesystem(&fastsock_fs_type);
+
+	kmem_cache_destroy(socket_cachep);
 
 	printk(KERN_INFO "Remove Fastsocket Module\n");
 }
