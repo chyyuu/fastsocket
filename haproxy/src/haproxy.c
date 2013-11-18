@@ -1500,6 +1500,8 @@ int main(int argc, char **argv)
 		install_inotify_watch(proxy);
 		enable_inotify();
 	}
+
+	sleep(30);
 	
 	protocol_enable_all();
 	/*

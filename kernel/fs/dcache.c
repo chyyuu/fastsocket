@@ -227,8 +227,8 @@ void dput_fastsocket(struct dentry *dentry)
 	inode = dentry->d_inode;
 	if (inode)
 		iput_fastsocket(inode);
-	//else
-	//	WARN_ON(1);
+	else
+		WARN_ON(1);
 
 	d_free(dentry);
 }
