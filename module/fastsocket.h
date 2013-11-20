@@ -47,6 +47,11 @@ static inline struct inode *SOCKET_INODE(struct socket *socket)
 	return &container_of(socket, struct fsocket_alloc, socket)->vfs_inode;
 }
 
+static inline struct socket *INODE_SOCKET(struct inode *inode)
+{
+	return &container_of(inode, struct socket_alloc, vfs_inode)->socket;
+}
+
 struct read_sock_arg {
 	char __user *buf;
 	int size;

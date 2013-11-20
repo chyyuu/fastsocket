@@ -60,9 +60,20 @@ static struct vfsmount *sock_mnt;
 static DEFINE_PER_CPU(int, fastsockets_in_use) = 0;
 static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
 
+extern int inet_create(struct net *net, struct socket *sock, int protocol, int kern);
+
+static int fsocket_filp_close(struct file *file);
+static void fsock_release_sock(struct socket *sock);
+
 static void fastsock_destroy_inode(struct inode *inode)
 {
 	DPRINTK(DEBUG, "Free inode 0x%p\n", inode);
+
+	if (inode->i_mode & S_IFSOCK)
+		fsock_release_sock(INODE_SOCKET(inode));
+	else
+		WARN_ON(1);
+
 	kmem_cache_free(socket_cachep, container_of(inode, struct socket_alloc, vfs_inode));
 
 	percpu_sub(fastsockets_in_use, 1);
@@ -84,7 +95,7 @@ static struct inode *fastsock_alloc_inode(struct super_block *sb)
 	ei->socket.sk = NULL;
 	ei->socket.file = NULL;
 
-	DPRINTK(ERR, "Allocate inode 0x%p\n", &ei->vfs_inode);
+	DPRINTK(INFO, "Allocate inode 0x%p\n", &ei->vfs_inode);
 
 	return &ei->vfs_inode;
 }
@@ -109,12 +120,6 @@ static struct file_system_type fastsock_fs_type = {
 	.get_sb = fastsockfs_get_sb,
 	.kill_sb = kill_anon_super,
 };
-
-extern int inet_create(struct net *net, struct socket *sock, int protocol,
-		       int kern);
-
-static int fsocket_filp_close(struct file *file);
-static void fsock_release_sock(struct socket *sock);
 
 static inline unsigned int fast_poll(struct file *file, poll_table *wait)
 {
@@ -183,7 +188,6 @@ static char *fastsockfs_dname(struct dentry *dentry, char *buffer, int buflen)
 }
 
 static const struct dentry_operations fastsockfs_dentry_operations = {
-	//.d_delete = sockfs_delete_dentry,
 	.d_dname  = fastsockfs_dname,
 };
 
@@ -195,67 +199,45 @@ static void __put_unused_fd(struct files_struct *files, unsigned int fd)
 		files->next_fd = fd;
 }
 
-static inline void __fsock_release_sock(struct socket *sock)
+static inline void fsock_release_sock(struct socket *sock)
 {
-	struct inode *inode = SOCK_INODE(sock);
-
-	//Test i_count because we may release a spawned shared listen socket
-	if (atomic_read(&inode->i_count) == 1) {
-		if (sock->ops) {
-			sock->ops->release(sock);
-			sock->ops = NULL;
-		}
+	if (sock->ops) {
+		DPRINTK(DEBUG, "Release inode socket 0x%p\n", SOCK_INODE(sock));
+		sock->ops->release(sock);
+		sock->ops = NULL;
 	}
-}
-
-static void fsock_release_sock(struct socket *sock)
-{
-	//struct inode *inode;
-
-
-	__fsock_release_sock(sock);
-
-	//inode = SOCK_INODE(sock);
-
-	//DPRINTK(DEBUG, "Release socket inode 0x%p[%d] with file 0x%p\n", inode, atomic_read(&inode->i_count), sock->file);
-
-	//if (!sock->file) {
-	//	DPRINTK(DEBUG, "Free socket inode 0x%p[%d] with file 0x%p\n", inode, atomic_read(&inode->i_count), sock->file);
-	//	iput_fastsocket(SOCK_INODE(sock));
-	//	return;
-	//}
-
-	//sock->file = NULL;
 }
 
 static int __fsocket_filp_close(struct file *file)
 {	
-	struct socket *sock;
 	struct dentry *dentry = file->f_path.dentry;
 
 	if (atomic_long_dec_and_test(&file->f_count)) {
 		
 		eventpoll_release(file);
 
-		sock = (struct socket *)file->private_data;
-		if (sock)
-			__fsock_release_sock(sock);
-
+		file->private_data = NULL;
 		file->f_path.dentry = NULL;
 		file->f_path.mnt = NULL;
+
 		put_empty_filp(file);
 
 		if (dentry) {
 			DPRINTK(DEBUG, "Release dentry 0x%p[%d]\n", dentry, atomic_read(&dentry->d_count));
 			DPRINTK(DEBUG, "Release inode 0x%p[%d]\n", dentry->d_inode, atomic_read(&dentry->d_inode->i_count));
 		}
+		else {
+			DPRINTK(ERR, "No dentry for file 0x%p\n", file);
+		}
 
 		dput(dentry);
 		return 0;
 
 	}
-	else
+	else {
+		DPRINTK(INFO, "Next time to release file 0x%p[%ld]\n", file, atomic_long_read(&file->f_count));
 		return 1;
+	}
 }
 
 static inline int fsocket_filp_close(struct file *file)
@@ -284,8 +266,6 @@ static int fsocket_close(unsigned int fd)
 	struct fdtable *fdt;
 	int retval = 0;
 
-	DPRINTK(DEBUG,"%s\n", __func__);
-
 	spin_lock(&files->file_lock);
 	fdt = files_fdtable(files);
 	if (fd >= fdt->max_fds)
@@ -312,20 +292,18 @@ out_unlock:
 static struct socket *fsocket_alloc_socket(void)
 {
 	struct socket *sock;
-	struct inode *inode;
+	struct inode *inode = NULL;
 
-	//Just guess this inode number is not something really matters.
+	//FIXME: Just guess this inode number is not something really matters.
 	static unsigned int last_ino = FSOCKET_INODE_START;
-	
-	sock = (struct socket *)kmem_cache_alloc_node(socket_cachep, GFP_USER, numa_node_id());
+
+	sock = (struct socket *)kmem_cache_alloc(socket_cachep, GFP_KERNEL);
 
 	if (sock != NULL) {
 
 		static const struct inode_operations empty_iops;
 		static const struct file_operations empty_fops;
 
-		DPRINTK(DEBUG, "Allocat inode 0x%p\n", SOCKET_INODE(sock));
-	
 		init_waitqueue_head(&sock->wait);
 
 		sock->fasync_list = NULL;
@@ -356,6 +334,8 @@ static struct socket *fsocket_alloc_socket(void)
 		inode->i_gid = current_fsgid();
 
 		percpu_add(fastsockets_in_use, 1);
+
+		DPRINTK(DEBUG, "Allocat inode 0x%p\n", inode);
 	}
 
 	return sock;
@@ -403,11 +383,7 @@ static struct dentry *fsock_d_alloc(struct socket *sock, struct dentry *parent, 
 	INIT_LIST_HEAD(&dentry->d_subdirs);
 	INIT_LIST_HEAD(&dentry->d_alias);
 
-	//XIAOFENG6
-
-
 	INIT_LIST_HEAD(&dentry->d_u.d_child);
-
 
 	inode = SOCK_INODE(sock);
 
@@ -416,12 +392,7 @@ static struct dentry *fsock_d_alloc(struct socket *sock, struct dentry *parent, 
 	dentry->d_flags |= DCACHE_FASTSOCKET | DCACHE_DISCONNECTED;
 	dentry->d_inode = inode;
 
-	//fsnotify_d_instantiate(dentry, inode);
-	//security_d_instantiate(dentry, inode);
-
 	dentry->d_op = &fastsockfs_dentry_operations;
-
-	//XIAOFENG6
 
 	return dentry;
 }
@@ -440,7 +411,7 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 		return fd;
 	}
 
-	//Initialize path
+	//Initialize path structure
 	
 	path.dentry = fsock_d_alloc(sock, NULL, &name);
 	if (unlikely(!path.dentry)) {
@@ -515,7 +486,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	 * Allocate file for local spawned listen socket.
 	*/
 
-	DPRINTK(INFO, "Spawn inode 0x%p\n", SOCK_INODE(oldsock));
+	DPRINTK(DEBUG, "Spawn inode 0x%p\n", SOCK_INODE(oldsock));
 
 	sfile = get_empty_filp();
 	if (sfile == NULL) {
@@ -582,7 +553,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	if (nfile == NULL) {
 		err = -ENOMEM;
 		printk(KERN_ERR "Spawn global listen socket alloc file failed\n");
-		fsocket_filp_close(sfile);
+		__fsocket_filp_close(sfile);
 		goto out;
 	}
 
@@ -593,7 +564,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		err = -ENOMEM;
 		printk(KERN_ERR "Spawn listen socket alloc dentry failed\n");
 		put_empty_filp(nfile);
-		fsocket_filp_close(sfile);
+		__fsocket_filp_close(sfile);
 		goto out;
 	}
 
@@ -614,10 +585,12 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	//Add i_count for this socket inode.
 	atomic_inc(&SOCK_INODE(oldsock)->i_count);
 
-	fput(ofile);
 	fd_reinstall(fd, nfile);
 
-	//DPRINTK(DEBUG, "Clone new socket %d\n", err);
+	DPRINTK(INFO, "Close old socket file 0x%p\n", ofile);
+	__fsocket_filp_close(ofile);
+	
+	DPRINTK(DEBUG, "Clone new socket %d\n", err);
 
 	*newsock = sock;
 
@@ -669,8 +642,6 @@ static int fsocket_socket(int flags)
 		goto release_sock;
 	}
 
-	//DPRINTK(DEBUG, "create new socket %d\n", err);
-
 	goto out;
 
 release_sock:
@@ -715,7 +686,6 @@ static int fsocket_ep_insert(struct eventpoll *ep, struct epoll_event *event, st
 	init_poll_funcptr(&epq.pt, ep_ptable_queue_proc);
 
 	//XIAOFENG6
-	//revents = tcp_poll(tfile, (struct socket *)tfile->private_data, &epq.pt);
 	revents = tfile->f_op->poll(tfile, &epq.pt);
 	//XIAOFENG6
 
@@ -874,8 +844,6 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 	struct socket *sock = (struct socket *)tfile->private_data;
 	struct file *sfile;
 
-	DPRINTK(DEBUG, "Epoll_ctl socket %d\n", fd);
-
 	if (copy_from_user(&epds, ev, sizeof(struct epoll_event)))
 		return -EFAULT;
 
@@ -985,7 +953,7 @@ static int fsocket_spawn(struct file *filp, int fd, int cpu)
 	struct socket *sock, *newsock;
 	struct sockaddr_in addr;
 
-	DPRINTK(INFO, "Listen spawn listen fd %d on CPU %d\n", fd, cpu);
+	DPRINTK(DEBUG, "Listen spawn listen fd %d on CPU %d\n", fd, cpu);
 
 	if (!enable_listen_spawn) {
 		printk(KERN_ERR "Module para disable listen-spawn feature\n");
@@ -1073,6 +1041,8 @@ static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 		return -EINVAL;
 	}
 
+	DPRINTK(DEBUG, "Listen spawn listen fd %d\n", fd);
+
 	if (f->f_mode & FMODE_FASTSOCKET)
 		ret = fsocket_spawn(f, fd, -1);
 	else {
@@ -1143,9 +1113,15 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		goto out;
 	}
 
-	if (s_op != SOCKET_INODE(newsock)->i_sb->s_op)
-		DPRINTK(INFO, "Check inode 0x%p sb 0x%p ops 0x%p\n", SOCKET_INODE(newsock), 
-			SOCKET_INODE(newsock)->i_sb, SOCKET_INODE(newsock)->i_sb->s_op);
+	if (SOCKET_INODE(newsock)->i_sb->s_op) {
+		if (s_op != SOCKET_INODE(newsock)->i_sb->s_op) {
+			DPRINTK(INFO, "Check inode 0x%p sb 0x%p ops 0x%p\n", SOCKET_INODE(newsock), 
+				SOCKET_INODE(newsock)->i_sb, SOCKET_INODE(newsock)->i_sb->s_op);
+		}
+	}
+	else {
+		DPRINTK(INFO, "NULL ops inode 0x%p 0x%p\n", SOCKET_INODE(newsock), SOCKET_INODE(newsock)->i_sb);
+	}
 
 	newsock->type = SOCK_STREAM;
 	newsock->ops = sock->ops;
@@ -1171,7 +1147,6 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		if (!lsock) {
 			printk(KERN_ERR "No socket for sub file\n");
 			err = -EBADF;
-			//fsock_release_sock(newsock);
 			goto out_fd;
 		}
 
@@ -1185,14 +1160,9 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		}
 		else {
 			DPRINTK(DEBUG, "Accept local listen socket 0x%p\n", lsock);
-			//icsk = inet_csk(lsock->sk);
-			//if (reqsk_queue_empty(&icsk->icsk_accept_queue))
-			//	printk(KERN_ERR "Local listen socket queue empty\n");
 			err = fsocket_local_accept(lsock, newsock, O_NONBLOCK);
 		}
 	}
-
-	//err = sock->ops->accept(sock, newsock, O_NONBLOCK);
 
 	if (err < 0)
 	{	
@@ -1226,7 +1196,7 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 	goto out;
 
 out_fd:
-	fsocket_filp_close(newfile);
+	__fsocket_filp_close(newfile);
 	put_unused_fd(newfd);
 out:
 	return err;
@@ -1249,8 +1219,9 @@ int fastsocket_accept(struct fsocket_ioctl_arg *u_arg)
 		return -ENOENT;
 	}
 
+	DPRINTK(DEBUG, "Accept fastsocket %d\n", arg.fd);
+
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
-		DPRINTK(DEBUG, "Accept fastsocket %d\n", arg.fd);
 		ret = fsocket_spawn_accept(tfile, arg.op.accept_op.sockaddr, arg.op.accept_op.sockaddr_len);
 	}
 	else {
@@ -1280,6 +1251,8 @@ static int fastsocket_socket(struct fsocket_ioctl_arg *u_arg)
 	type = arg.op.socket_op.type;
 	protocol = arg.op.socket_op.protocol;
 
+	DPRINTK(DEBUG,"New fastsocket\n");
+
 	if (( family == AF_INET ) && 
 		((type & SOCK_TYPE_MASK) == SOCK_STREAM )) {
 		fd = fsocket_socket(type & ~SOCK_TYPE_MASK);
@@ -1308,11 +1281,12 @@ static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
 
 	tfile = fget_light(arg.fd, &fput_need);
 
+	DPRINTK(DEBUG,"Close fastsocket %d\n", arg.fd);
+
 	if (tfile) {
 		if (tfile->f_mode & FMODE_FASTSOCKET) {
 			fput_light(tfile, fput_need);
 			error = fsocket_close(arg.fd);
-			DPRINTK(DEBUG,"Close fastsocket %d\n", arg.fd);
 		}
 		else {
 			fput_light(tfile, fput_need);
@@ -1352,6 +1326,8 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 		DPRINTK(ERR, "target file don't exist!\n");
 		return -EINVAL;
 	}
+
+	DPRINTK(DEBUG, "Epoll_ctl socket %d\n", arg.fd);
 
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
 		ret = fsocket_epoll_ctl(ep, tfile, arg.fd, arg.op.epoll_op.ep_ctl_cmd, arg.op.epoll_op.ev);
@@ -1524,14 +1500,13 @@ static int fsocket_open(struct inode *inode, struct file *filp)
 
 	DPRINTK(WARNING, "Hold module reference\n");
 
-	//filp->private_data = (void *)THIS_MODULE;
+	filp->private_data = (void *)THIS_MODULE;
 	return 0;
 }
 
 static int fsocket_release(struct inode *inode, struct file *filp)
 {
-	//module_put(filp->private_data);
-	module_put(THIS_MODULE);
+	module_put(filp->private_data);
 	
 	DPRINTK(WARNING, "Release module reference\n");
 

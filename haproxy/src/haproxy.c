@@ -1501,8 +1501,6 @@ int main(int argc, char **argv)
 		enable_inotify();
 	}
 
-	sleep(30);
-	
 	protocol_enable_all();
 	/*
 	 * That's it : the central polling loop. Run until we stop.
