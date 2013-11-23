@@ -52,6 +52,10 @@ struct fsocket_ioctl_arg {
 		//	void *sockaddr;
 		//	int sockaddr_len;
 		//}connect_op;
+		
+		struct spawn_op_t {
+			int cpu;
+		}spawn_op;
 
 		struct io_op_t {
 			char *buf;

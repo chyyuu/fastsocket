@@ -5,11 +5,14 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <errno.h>
+#include <unistd.h>
+
+#define __USE_GNU
+#include <sched.h>
 
 #include "libsocket.h"
 
 static int fsocket_channel_fd = -1;
-static int fsocket_epoll_fd = -1;
 
 #define SYSCALL_DEFINE(name, ...) __wrap_##name(__VA_ARGS__)
 #define SYSCALL(name, ...)  __real_##name(__VA_ARGS__)
@@ -26,20 +29,38 @@ do {\
 
 static int fsocket_listen_fds[MAX_LISTEN_FD];
 
+inline int get_num_cpus()
+{
+        return sysconf(_SC_NPROCESSORS_ONLN);
+}
+
 __attribute__((constructor))
 void fastsocket_init(void)
 {
 	int ret = 0;
 	int i;
+	cpu_set_t cmask;
 
-	fsocket_channel_fd = open("/dev/fastsocket_channel", O_RDONLY);
-	if (fsocket_channel_fd < 0) {
+	ret = open("/dev/fastsocket_channel", O_RDONLY);
+	if (ret < 0) {
 		FSOCKET_DBG(FSOCKET_ERR, "Open fastsocket channel failed, please CHECK\n");
 		exit(-1);
 	}
+	fsocket_channel_fd = ret;
 
 	for (i = 0; i < MAX_LISTEN_FD; i++)
 		fsocket_listen_fds[i] = 0;
+
+        CPU_ZERO(&cmask);
+
+	for (i = 0; i < get_num_cpus(); i++)
+		CPU_SET(i, &cmask);
+
+        ret = sched_setaffinity(0, get_num_cpus(), &cmask);
+	if (ret < 0) {
+		FSOCKET_DBG(FSOCKET_ERR, "Clear process CPU affinity failed\n");
+		exit(-1);
+	}
 
 	return;
 }

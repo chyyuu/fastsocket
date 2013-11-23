@@ -22,6 +22,7 @@
 #include <linux/fdtable.h>
 #include <linux/mount.h>
 #include <linux/types.h>
+#include <linux/mutex.h>
 
 #include <linux/fsnotify.h>
 
@@ -235,7 +236,7 @@ static int __fsocket_filp_close(struct file *file)
 
 	}
 	else {
-		DPRINTK(INFO, "Next time to release file 0x%p[%ld]\n", file, atomic_long_read(&file->f_count));
+		DPRINTK(DEBUG, "Next time to release file 0x%p[%ld]\n", file, atomic_long_read(&file->f_count));
 		return 1;
 	}
 }
@@ -468,12 +469,15 @@ static int fsock_map_fd(struct socket *sock, int flags)
 	return fd;
 }
 
-
+static void fsocket_copy_socket(struct socket *oldsock, struct socket *newsock)
+{
+	newsock->sk->sk_reuse = oldsock->sk->sk_reuse;
+}
 
 static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **newsock)
 {
 	struct socket *sock;
-	struct tcp_sock *tp;
+	//struct tcp_sock *tp;
 	struct file *ofile, *nfile, *sfile;
 	struct qstr name = { .name = "" };
 	struct path path;
@@ -515,9 +519,11 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		goto out;
 	}
 
-	tp = tcp_sk(sock->sk);
+	fsocket_copy_socket(oldsock, sock);
+
+	//tp = tcp_sk(sock->sk);
 	//TODO: Default TCP OPT For Fastsocket.
-	tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
+	//tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
 
 	path.dentry = fsock_d_alloc(sock, NULL, &name);
 	if (unlikely(!path.dentry)) {
@@ -587,7 +593,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 
 	fd_reinstall(fd, nfile);
 
-	DPRINTK(INFO, "Close old socket file 0x%p\n", ofile);
+	DPRINTK(DEBUG, "Close old socket file 0x%p\n", ofile);
 	__fsocket_filp_close(ofile);
 	
 	DPRINTK(DEBUG, "Clone new socket %d\n", err);
@@ -603,7 +609,7 @@ out:
 static int fsocket_socket(int flags)
 {
 	struct socket *sock;
-	struct tcp_sock *tp;
+	//struct tcp_sock *tp;
 
 	int err = 0;
 
@@ -631,9 +637,9 @@ static int fsocket_socket(int flags)
 	}
 
 
-	tp = tcp_sk(sock->sk);
+	//tp = tcp_sk(sock->sk);
 	//FIXME: Default TCP OPT For Fastsocket.
-	tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
+	//tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
 
 	err = fsock_map_fd(sock, flags);
 
@@ -901,9 +907,13 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 	return error;
 }
 
+cpumask_t cpuset;
+static DEFINE_MUTEX(cpumutex);
+
 static int fsocket_process_affinity(struct socket *sock)
 {
-	int ccpu, ncpu, tcpu;
+	int ccpu, ncpu, cpu;
+	int tcpu = -1;
 	struct cpumask mask;
 
 	mask = current->cpus_allowed;
@@ -912,8 +922,13 @@ static int fsocket_process_affinity(struct socket *sock)
 
 	if (ccpu > (sizeof(sock->sk->cpumask) << 3))
 	{
-		printk(KERN_ERR "CPU number exceeds size of cpumask\n");
+		DPRINTK(ERR, "CPU number exceeds size of cpumask\n");
 		return -EPERM;
+	}
+
+	if (ccpu >= nr_cpumask_bits) {
+		DPRINTK(DEBUG, "Current process affinity is mess\n");
+		return -EINVAL;
 	}
 
 	if (ncpu >= nr_cpumask_bits) {
@@ -926,7 +941,28 @@ static int fsocket_process_affinity(struct socket *sock)
 		return -EPERM;
 	}
 
-	tcpu = atomic_inc_return(&sock->sk->sk_affinity_seq) - 1;
+	mutex_lock(&cpumutex);
+
+	for (cpu = sock->sk->sk_affinity_seq; cpu < num_active_cpus(); 
+			cpu = sock->sk->sk_affinity_seq++) {
+		if (!cpu_isset(cpu, cpuset)) {
+			DPRINTK(DEBUG, "CPU %d is available for process affinity\n", cpu);
+			tcpu = cpu;
+			break;
+		}
+	}
+
+	if (tcpu >= 0) {
+		cpu_set(cpu, cpuset);
+		sock->sk->sk_affinity_seq++;
+	}
+	else {
+		DPRINTK(ERR, "Process number is more than CPU number\n");
+		mutex_unlock(&cpumutex);
+		return -EINVAL;
+	}
+
+	mutex_unlock(&cpumutex);
 
 	cpumask_clear(&current->cpus_allowed);
 	cpumask_set_cpu(tcpu, &current->cpus_allowed);
@@ -947,13 +983,14 @@ static int fsocket_sk_affinity(struct socket *sock, int cpu)
 	return err;
 }
 
-static int fsocket_spawn(struct file *filp, int fd, int cpu)
+static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 {
 	int ret = 0, nfd, backlog;
+	int cpu;
 	struct socket *sock, *newsock;
 	struct sockaddr_in addr;
 
-	DPRINTK(DEBUG, "Listen spawn listen fd %d on CPU %d\n", fd, cpu);
+	DPRINTK(DEBUG, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
 
 	if (!enable_listen_spawn) {
 		printk(KERN_ERR "Module para disable listen-spawn feature\n");
@@ -1025,6 +1062,7 @@ static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 	struct fsocket_ioctl_arg arg;
 	struct file *f = NULL;
 	int fd;
+	int tcpu;
 	int ret = 0;
 	int fput_needed;
 
@@ -1034,6 +1072,7 @@ static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 	}
 	
 	fd = arg.fd;
+	tcpu = arg.op.spawn_op.cpu;
 
 	f = fget_light(fd, &fput_needed);
 	if (f == NULL) {
@@ -1044,7 +1083,7 @@ static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 	DPRINTK(DEBUG, "Listen spawn listen fd %d\n", fd);
 
 	if (f->f_mode & FMODE_FASTSOCKET)
-		ret = fsocket_spawn(f, fd, -1);
+		ret = fsocket_spawn(f, fd, tcpu);
 	else {
 		DPRINTK(INFO, "Spawn non fastsocket\n");
 		return -EINVAL;
@@ -1095,7 +1134,7 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 
 	struct file *newfile;
 
-	struct tcp_sock *tp;
+	//struct tcp_sock *tp;
 	struct inet_connection_sock *icsk;
 
 	sock = (struct socket *)file->private_data;
@@ -1111,16 +1150,6 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		printk(KERN_ERR "Allocate empty socket failed\n");
 		err = -ENOMEM;
 		goto out;
-	}
-
-	if (SOCKET_INODE(newsock)->i_sb->s_op) {
-		if (s_op != SOCKET_INODE(newsock)->i_sb->s_op) {
-			DPRINTK(INFO, "Check inode 0x%p sb 0x%p ops 0x%p\n", SOCKET_INODE(newsock), 
-				SOCKET_INODE(newsock)->i_sb, SOCKET_INODE(newsock)->i_sb->s_op);
-		}
-	}
-	else {
-		DPRINTK(INFO, "NULL ops inode 0x%p 0x%p\n", SOCKET_INODE(newsock), SOCKET_INODE(newsock)->i_sb);
 	}
 
 	newsock->type = SOCK_STREAM;
@@ -1186,9 +1215,9 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 
 	//sock_set_flag(sock->sk, SOCK_LWS);
 
-	tp = tcp_sk(sock->sk);
+	//tp = tcp_sk(sock->sk);
 	//TODO: Default TCP OPT For Fastsocket.
-	tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
+	//tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
 
 	fd_install(newfd, newfile);
 	err = newfd;
@@ -1498,7 +1527,7 @@ static int fsocket_open(struct inode *inode, struct file *filp)
 		return -EINVAL;
 	}
 
-	DPRINTK(WARNING, "Hold module reference\n");
+	DPRINTK(INFO, "Hold module reference\n");
 
 	filp->private_data = (void *)THIS_MODULE;
 	return 0;
@@ -1508,7 +1537,7 @@ static int fsocket_release(struct inode *inode, struct file *filp)
 {
 	module_put(filp->private_data);
 	
-	DPRINTK(WARNING, "Release module reference\n");
+	DPRINTK(INFO, "Release module reference\n");
 
 	return 0;
 }
@@ -1536,6 +1565,10 @@ static void init_once(void *foo)
 static int __init  fastsocket_init(void)
 {
 	int ret = 0;
+
+	DPRINTK(INFO, "CPU number: online %d possible %d present %d active %d\n",
+			num_online_cpus(), num_possible_cpus(),
+			num_present_cpus(), num_active_cpus());
 	
 	ret = misc_register(&fastsocket_dev);
 	if (ret < 0) {
@@ -1554,7 +1587,7 @@ static int __init  fastsocket_init(void)
 	}
 
 	sock_mnt = kern_mount(&fastsock_fs_type);
-	DPRINTK(INFO, "Fastsocket super block 0x%p ops 0x%p\n", sock_mnt->mnt_sb, sock_mnt->mnt_sb->s_op);
+	DPRINTK(DEBUG, "Fastsocket super block 0x%p ops 0x%p\n", sock_mnt->mnt_sb, sock_mnt->mnt_sb->s_op);
 
 	s_op = sock_mnt->mnt_sb->s_op;
 
@@ -1575,7 +1608,7 @@ static void __exit fastsocket_exit(void)
 {
 	misc_deregister(&fastsocket_dev);
 
-	DPRINTK(INFO, "Fastsocket super block 0x%p ops 0x%p\n", sock_mnt->mnt_sb, sock_mnt->mnt_sb->s_op);
+	DPRINTK(DEBUG, "Fastsocket super block 0x%p ops 0x%p\n", sock_mnt->mnt_sb, sock_mnt->mnt_sb->s_op);
 	mntput(sock_mnt);
 	unregister_filesystem(&fastsock_fs_type);
 
