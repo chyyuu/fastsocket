@@ -4,10 +4,16 @@
 
 killall haproxy
 
-make clean
+sleep 1
 
-make TARGET=linux26
+make clean; make TARGET=linux26
 
-./haproxy -f 1.cfg
+cd ../library
+
+make clean; make
+
+cd ../haproxy
+
+LD_PRELOAD=../library/libsocket.so ./haproxy -f 1.cfg
 
 netstat -tnpl
