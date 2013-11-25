@@ -467,7 +467,7 @@ COPTS += -DSVN_VERSION=\"$(SVN_VERSION)\" -DCOMPILE_DATE=\"$(COMPILE_DATE)\"
 #### Global link options
 # These options are added at the end of the "ld" command line. Use LDFLAGS to
 # add options at the beginning of the "ld" command line if needed.
-LDOPTS = $(TARGET_LDFLAGS) $(OPTIONS_LDFLAGS) $(ADDLIB) -L. -lsocket
+LDOPTS = $(TARGET_LDFLAGS) $(OPTIONS_LDFLAGS) $(ADDLIB)
 
 ifeq ($(TARGET),)
 all:
@@ -516,8 +516,7 @@ LIB_EBTREE = $(EBTREE_DIR)/libebtree.a
 
 haproxy: src/haproxy.o $(OBJS) $(OPTIONS_OBJS) $(EBTREE_OBJS)
 	$(CC) -c -g libsocket.c
-	$(AR) -r libsocket.a libsocket.o
-	$(LD)  -Wl,-wrap,socket -Wl,-wrap,close -Wl,-wrap,accept -Wl,-wrap,listen -Wl,-wrap,epoll_ctl $(LDFLAGS) -o $@ $^ $(LDOPTS)
+	$(LD) $(LDFLAGS) -o $@ $^ $(LDOPTS)
 
 acl_file_verify: $(OBJS) $(OPTIONS_OBJS) $(EBTREE_OBJS) src/acl_file_verify.o
 	$(LD) $(LDFLAGS) -o $@ $^ $(LDOPTS)
