@@ -798,9 +798,12 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
 	return kernel_sendpage(sock, page, offset, size, flags);
 }
 
-static ssize_t sock_splice_read(struct file *file, loff_t *ppos,
+//XIAOFENG6
+//static ssize_t sock_splice_read(struct file *file, loff_t *ppos,
+ssize_t sock_splice_read(struct file *file, loff_t *ppos,
 			        struct pipe_inode_info *pipe, size_t len,
 				unsigned int flags)
+//XIAOFENG6
 {
 	struct socket *sock = file->private_data;
 
@@ -811,6 +814,10 @@ static ssize_t sock_splice_read(struct file *file, loff_t *ppos,
 
 	return sock->ops->splice_read(sock, ppos, pipe, len, flags);
 }
+
+//XIAOFENG6
+EXPORT_SYMBOL(sock_splice_read);
+//XIAOFENG6
 
 static struct sock_iocb *alloc_sock_iocb(struct kiocb *iocb,
 					 struct sock_iocb *siocb)
@@ -849,8 +856,12 @@ static ssize_t do_sock_read(struct msghdr *msg, struct kiocb *iocb,
 	return __sock_recvmsg(iocb, sock, msg, size, msg->msg_flags);
 }
 
-static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
-				unsigned long nr_segs, loff_t pos)
+//XIAOFENG6
+//static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
+//				unsigned long nr_segs, loff_t pos)
+ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov, 
+		unsigned long nr_segs, loff_t pos)
+//XIAOFENG6
 {
 	struct sock_iocb siocb, *x;
 
@@ -866,6 +877,10 @@ static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
 		return -ENOMEM;
 	return do_sock_read(&x->async_msg, iocb, iocb->ki_filp, iov, nr_segs);
 }
+
+//XIAOFENG6
+EXPORT_SYMBOL(sock_aio_read);
+//XIAOFENG6
 
 static ssize_t do_sock_write(struct msghdr *msg, struct kiocb *iocb,
 			struct file *file, const struct iovec *iov,
@@ -891,8 +906,12 @@ static ssize_t do_sock_write(struct msghdr *msg, struct kiocb *iocb,
 	return __sock_sendmsg(iocb, sock, msg, size);
 }
 
-static ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
-			  unsigned long nr_segs, loff_t pos)
+//XIAOFENG6
+//static ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
+//			  unsigned long nr_segs, loff_t pos)
+//XIAOFENG6
+ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
+		  unsigned long nr_segs, loff_t pos)
 {
 	struct sock_iocb siocb, *x;
 
@@ -905,6 +924,10 @@ static ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
 
 	return do_sock_write(&x->async_msg, iocb, iocb->ki_filp, iov, nr_segs);
 }
+
+//XIAOFENG6
+EXPORT_SYMBOL(sock_aio_write);
+//XIAOFENG6
 
 /*
  * Atomic setting of ioctl hooks to avoid race

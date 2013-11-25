@@ -29,7 +29,7 @@ do {\
 
 static int fsocket_listen_fds[MAX_LISTEN_FD];
 
-inline int get_num_cpus()
+inline int get_cpus()
 {
         return sysconf(_SC_NPROCESSORS_ONLN);
 }
@@ -53,10 +53,10 @@ void fastsocket_init(void)
 
         CPU_ZERO(&cmask);
 
-	for (i = 0; i < get_num_cpus(); i++)
+	for (i = 0; i < get_cpus(); i++)
 		CPU_SET(i, &cmask);
 
-        ret = sched_setaffinity(0, get_num_cpus(), &cmask);
+        ret = sched_setaffinity(0, get_cpus(), &cmask);
 	if (ret < 0) {
 		FSOCKET_DBG(FSOCKET_ERR, "Clear process CPU affinity failed\n");
 		exit(-1);
@@ -181,6 +181,7 @@ int SYSCALL_DEFINE(close, int fd)
 
 	return ret;
 }
+/*
 
 int SYSCALL_DEFINE(write, int fd, char *buf, int buf_len)
 {
@@ -224,6 +225,8 @@ int SYSCALL_DEFINE(read, int fd, char *buf, int buf_len)
 
 	return ret;
 }
+
+*/
 
 int SYSCALL_DEFINE(epoll_ctl, int efd, int cmd, int fd, struct epoll_event *ev)
 {

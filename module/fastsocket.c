@@ -96,7 +96,7 @@ static struct inode *fastsock_alloc_inode(struct super_block *sb)
 	ei->socket.sk = NULL;
 	ei->socket.file = NULL;
 
-	DPRINTK(INFO, "Allocate inode 0x%p\n", &ei->vfs_inode);
+	DPRINTK(DEBUG, "Allocate inode 0x%p\n", &ei->vfs_inode);
 
 	return &ei->vfs_inode;
 }
@@ -122,7 +122,7 @@ static struct file_system_type fastsock_fs_type = {
 	.kill_sb = kill_anon_super,
 };
 
-static inline unsigned int fast_poll(struct file *file, poll_table *wait)
+static inline unsigned int fast_sock_poll(struct file *file, poll_table *wait)
 {
 	struct socket *sock;
 	
@@ -130,38 +130,116 @@ static inline unsigned int fast_poll(struct file *file, poll_table *wait)
 	return sock->ops->poll(file, sock, wait);
 }
 
-static inline int fast_close(struct inode *i_node, struct file *file)
+static inline int fast_sock_close(struct inode *i_node, struct file *file)
 {
 	return fsocket_filp_close(file);
 }
 
-loff_t fast_llseek(struct file *file, loff_t offset, int origin)
+loff_t fast_sock_llseek(struct file *file, loff_t offset, int origin)
 {
 	return -ESPIPE;
 }
 
-static int fast_open(struct inode *irrelevant, struct file *dontcare)
+static int fast_sock_open(struct inode *irrelevant, struct file *dontcare)
 {
 	return -ENXIO;
 }
 
+extern ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos);
+
+extern ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos);
+
+static inline ssize_t fast_sock_read(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos)
+{
+	ssize_t ret;
+	ret = sock_aio_read(iocb, iov, nr_segs, pos);
+	DPRINTK(DEBUG, "Read %ld\n", ret);
+	return ret;
+}
+
+static inline ssize_t fast_sock_write(struct kiocb *iocb, const struct iovec *iov, 
+		unsigned long nr_segs, loff_t pos)
+{
+	ssize_t ret;
+	ret = sock_aio_write(iocb, iov, nr_segs, pos);
+	DPRINTK(DEBUG, "Write %ld\n", ret);
+	return ret;
+}
+
+static inline long fast_sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
+{
+	DPRINTK(INFO, "Do!\n");
+	return -EINVAL;
+}
+
+static inline long fast_compate_sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
+{
+	DPRINTK(INFO, "Do!\n");
+	return -EINVAL;
+}
+
+static inline int fast_sock_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	DPRINTK(INFO, "Do!\n");
+	return -EINVAL;
+}
+
+static inline int fast_sock_fasync(int fd, struct file *filp, int on)
+{
+	DPRINTK(INFO, "Do!\n");
+	return -EINVAL;
+}
+
+static inline ssize_t fast_sock_sendpage(struct file *file, struct page *page, 
+		int offset, size_t size, loff_t *ppos, int more)
+{
+	DPRINTK(INFO, "Do!\n");
+	return -EINVAL;
+}
+
+extern ssize_t generic_splice_sendpage(struct pipe_inode_info *pipe, 
+		struct file *out, loff_t *ppos, size_t len, unsigned int flags);
+extern ssize_t sock_splice_read(struct file *file, loff_t *ppos, 
+		struct pipe_inode_info *pipe, size_t len, unsigned int flags);
+
+static inline ssize_t fast_sock_splice_write(struct pipe_inode_info *pipe, 
+		struct file *out, loff_t *ppos, size_t len, unsigned int flags)
+{
+	ssize_t ret;
+	ret = generic_splice_sendpage(pipe, out, ppos, len, flags);
+	DPRINTK(INFO, "Splice wirte %ld\n", ret);
+	return ret;
+}
+
+static inline ssize_t fast_sock_splice_read(struct file *file, loff_t *ppos, 
+		struct pipe_inode_info *pipe, size_t len, unsigned int flags)
+{
+	ssize_t ret;
+	ret = sock_splice_read(file, ppos, pipe, len, flags);
+	DPRINTK(INFO, "Splice read %ld\n", ret);
+	return ret;
+}
+
 static const struct file_operations socket_file_ops = {
 	.owner = 	THIS_MODULE,
-	.llseek =	fast_llseek,
-	.aio_read = 	NULL,
-	.aio_write =	NULL,
-	.poll =		fast_poll,
-	.unlocked_ioctl = NULL,
+	.llseek =	fast_sock_llseek,
+	.aio_read = 	fast_sock_read,
+	.aio_write =	fast_sock_write,
+	.poll =		fast_sock_poll,
+	.unlocked_ioctl = fast_sock_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl = NULL,
+	.compat_ioctl = fast_compate_sock_ioctl,
 #endif
-	.mmap =		NULL,
-	.open =		fast_open,	/* special open code to disallow open via /proc */
-	.release =	fast_close,
-	.fasync =	NULL,
-	.sendpage =	NULL,
-	.splice_write = NULL,
-	.splice_read =	NULL,
+	.mmap =		fast_sock_mmap,
+	.open =		fast_sock_open,	/* special open code to disallow open via /proc */
+	.release =	fast_sock_close,
+	.fasync =	fast_sock_fasync,
+	.sendpage =	fast_sock_sendpage,
+	.splice_write = fast_sock_splice_write,
+	.splice_read =	fast_sock_splice_read,
 };
 
 static char *fastsockfs_dynamic_dname(struct dentry *dentry, char *buffer, int buflen,
@@ -1373,6 +1451,8 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 	return ret;
 }
 
+/*
+
 static int recv_tcp_actor(read_descriptor_t * desc, struct sk_buff *skb, 
 		unsigned int offset, size_t len)
 {
@@ -1495,6 +1575,7 @@ static int fastsocket_write(struct fsocket_ioctl_arg * u_arg)
 
 }
 
+*/
 
 static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
@@ -1505,10 +1586,10 @@ static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long 
 		return fastsocket_spawn((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_ACCEPT:
 		return fastsocket_accept((struct fsocket_ioctl_arg *)arg);
-	case FSOCKET_IOC_READ:
-		return fastsocket_read((struct fsocket_ioctl_arg *)arg);
-	case FSOCKET_IOC_WRITE:
-		return fastsocket_write((struct fsocket_ioctl_arg *)arg);
+	//case FSOCKET_IOC_READ:
+	//	return fastsocket_read((struct fsocket_ioctl_arg *)arg);
+	//case FSOCKET_IOC_WRITE:
+	//	return fastsocket_write((struct fsocket_ioctl_arg *)arg);
 	case FSOCKET_IOC_CLOSE:
 		return fastsocket_close((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_EPOLL_CTL:
