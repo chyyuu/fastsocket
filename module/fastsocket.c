@@ -1530,6 +1530,9 @@ static int fsocket_open(struct inode *inode, struct file *filp)
 	DPRINTK(INFO, "Hold module reference\n");
 
 	filp->private_data = (void *)THIS_MODULE;
+
+	cpus_clear(cpuset);
+
 	return 0;
 }
 
