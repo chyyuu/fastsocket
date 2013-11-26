@@ -23,6 +23,7 @@
 #include <linux/mount.h>
 #include <linux/types.h>
 #include <linux/mutex.h>
+#include <linux/sched.h>
 
 #include <linux/fsnotify.h>
 
@@ -549,7 +550,21 @@ static int fsock_map_fd(struct socket *sock, int flags)
 
 static void fsocket_copy_socket(struct socket *oldsock, struct socket *newsock)
 {
+	/* General sk flags */
+	//newsock->sk->sk_flags = oldsock->sk->sk_flags;
+	/* Non-Block */
+
+	/* REUSEADDR */
 	newsock->sk->sk_reuse = oldsock->sk->sk_reuse;
+	/* LINGER */
+	//newsock->sk->sk_lingertime = oldsock->sk->sk_lingertime;
+	/* TPROXY - IP_TRANSPARENT and IP_FREEBIND */
+
+	/* TCP_MAXSEG */
+
+	/* TCP_DEFER_ACCEPT */
+
+	/* TCP_QUICKACK */
 }
 
 static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **newsock)
@@ -992,11 +1007,12 @@ static int fsocket_process_affinity(struct socket *sock)
 {
 	int ccpu, ncpu, cpu;
 	int tcpu = -1;
-	struct cpumask mask;
+	struct cpumask omask, nmask;
 
-	mask = current->cpus_allowed;
-	ccpu = cpumask_first(&mask);
-	ncpu = cpumask_next(ccpu, &mask);
+	//mask = current->cpus_allowed;
+	sched_getaffinity(current->pid, &omask);
+	ccpu = cpumask_first(&omask);
+	ncpu = cpumask_next(ccpu, &omask);
 
 	if (ccpu > (sizeof(sock->sk->cpumask) << 3))
 	{
@@ -1005,7 +1021,7 @@ static int fsocket_process_affinity(struct socket *sock)
 	}
 
 	if (ccpu >= nr_cpumask_bits) {
-		DPRINTK(DEBUG, "Current process affinity is mess\n");
+		DPRINTK(DEBUG, "Current process affinity is messed up\n");
 		return -EINVAL;
 	}
 
@@ -1042,8 +1058,11 @@ static int fsocket_process_affinity(struct socket *sock)
 
 	mutex_unlock(&cpumutex);
 
-	cpumask_clear(&current->cpus_allowed);
-	cpumask_set_cpu(tcpu, &current->cpus_allowed);
+	//cpumask_clear(&current->cpus_allowed);
+	//cpumask_set_cpu(tcpu, &current->cpus_allowed);
+	cpumask_clear(&nmask);
+	cpumask_set_cpu(tcpu, &nmask);
+	sched_setaffinity(current->pid, &nmask);
 
 	DPRINTK(DEBUG, "Target socket affinity :%d\n", tcpu);
 
