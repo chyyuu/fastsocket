@@ -1031,7 +1031,7 @@ static int fsocket_process_affinity(struct socket *sock)
 	}
 
 	if (ncpu >= nr_cpumask_bits) {
-		DPRINTK(DEBUG, "Current process already binds to CPU %d\n", ccpu);
+		DPRINTK(INFO, "Current process already binds to CPU %d\n", ccpu);
 		return ccpu;
 	}
 
@@ -1045,7 +1045,7 @@ static int fsocket_process_affinity(struct socket *sock)
 	for (cpu = sock->sk->sk_affinity_seq; cpu < num_active_cpus(); 
 			cpu = sock->sk->sk_affinity_seq++) {
 		if (!cpu_isset(cpu, cpuset)) {
-			DPRINTK(DEBUG, "CPU %d is available for process affinity\n", cpu);
+			DPRINTK(INFO, "CPU %d is available for process affinity\n", cpu);
 			tcpu = cpu;
 			break;
 		}
@@ -1069,7 +1069,7 @@ static int fsocket_process_affinity(struct socket *sock)
 	cpumask_set_cpu(tcpu, &nmask);
 	sched_setaffinity(current->pid, &nmask);
 
-	DPRINTK(DEBUG, "Target socket affinity :%d\n", tcpu);
+	DPRINTK(INFO, "Target process affinity :%d\n", tcpu);
 
 	return tcpu;
 }
@@ -1200,28 +1200,38 @@ DECLARE_PER_CPU(struct inet_hash_stats, hash_stats);
 
 static inline int fsocket_common_accept(struct socket *sock, struct socket *newsock, int flags)
 {
-	__get_cpu_var(hash_stats).common_accept++;
+	int ret; 
 
-	return sock->ops->accept(sock, newsock, flags);
+	ret =  sock->ops->accept(sock, newsock, flags);
+	if (!ret)
+		__get_cpu_var(hash_stats).common_accept++;
+
+	return ret;
 }
 
 static inline int fsocket_local_accept(struct socket *sock, struct socket *newsock, int flags)
 {
-	__get_cpu_var(hash_stats).local_accept++;
+	int ret;
 
-	return sock->ops->accept(sock, newsock, flags);
+	ret = sock->ops->accept(sock, newsock, flags);
+	if (!ret)
+		__get_cpu_var(hash_stats).local_accept++;
+
+	return ret;
 }
 
 static inline int fsocket_global_accept(struct socket *sock, struct socket *newsock, int flags)
 {
+	int ret;
+
 	percpu_add(global_spawn_accept, 1);
 
 	if (percpu_read(global_spawn_accept) & 0x1) {
-		__get_cpu_var(hash_stats).global_accept++;
-
-		return sock->ops->accept(sock, newsock, flags);
+		ret = sock->ops->accept(sock, newsock, flags);
+		if (!ret)
+			__get_cpu_var(hash_stats).global_accept++;
+		return ret;
 	}
-
 	return -EAGAIN;
 }
 
