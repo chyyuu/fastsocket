@@ -550,21 +550,26 @@ static int fsock_map_fd(struct socket *sock, int flags)
 
 static void fsocket_copy_socket(struct socket *oldsock, struct socket *newsock)
 {
+	//TODO: Check if all these copy works.
+	
 	/* General sk flags */
-	//newsock->sk->sk_flags = oldsock->sk->sk_flags;
+	newsock->sk->sk_flags = oldsock->sk->sk_flags;
 	/* Non-Block */
 
-	/* REUSEADDR */
+	/* REUSEADDR (Verified) */
 	newsock->sk->sk_reuse = oldsock->sk->sk_reuse;
 	/* LINGER */
-	//newsock->sk->sk_lingertime = oldsock->sk->sk_lingertime;
+	newsock->sk->sk_lingertime = oldsock->sk->sk_lingertime;
 	/* TPROXY - IP_TRANSPARENT and IP_FREEBIND */
-
+	inet_sk(newsock->sk)->freebind = inet_sk(oldsock->sk)->freebind;
+	inet_sk(newsock->sk)->transparent = inet_sk(oldsock->sk)->transparent;
 	/* TCP_MAXSEG */
-
+	tcp_sk(newsock->sk)->rx_opt = tcp_sk(oldsock->sk)->rx_opt;
 	/* TCP_DEFER_ACCEPT */
-
+	inet_csk(newsock->sk)->icsk_accept_queue.rskq_defer_accept = 
+		inet_csk(oldsock->sk)->icsk_accept_queue.rskq_defer_accept;
 	/* TCP_QUICKACK */
+	inet_csk(newsock->sk)->icsk_ack = inet_csk(oldsock->sk)->icsk_ack;
 }
 
 static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **newsock)
