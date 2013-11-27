@@ -1006,6 +1006,7 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 }
 
 cpumask_t cpuset;
+int cpuseq;
 static DEFINE_MUTEX(cpumutex);
 
 static int fsocket_process_affinity(struct socket *sock)
@@ -1042,8 +1043,16 @@ static int fsocket_process_affinity(struct socket *sock)
 
 	mutex_lock(&cpumutex);
 
-	for (cpu = sock->sk->sk_affinity_seq; cpu < num_active_cpus(); 
-			cpu = sock->sk->sk_affinity_seq++) {
+	//for (cpu = sock->sk->sk_affinity_seq; cpu < num_active_cpus(); 
+	//		cpu = sock->sk->sk_affinity_seq++) {
+	//	if (!cpu_isset(cpu, cpuset)) {
+	//		DPRINTK(INFO, "CPU %d is available for process affinity\n", cpu);
+	//		tcpu = cpu;
+	//		break;
+	//	}
+	//}
+	
+	for (cpu = cpuseq; cpu < num_active_cpus(); cpu++) {
 		if (!cpu_isset(cpu, cpuset)) {
 			DPRINTK(INFO, "CPU %d is available for process affinity\n", cpu);
 			tcpu = cpu;
@@ -1053,7 +1062,7 @@ static int fsocket_process_affinity(struct socket *sock)
 
 	if (tcpu >= 0) {
 		cpu_set(cpu, cpuset);
-		sock->sk->sk_affinity_seq++;
+		cpuseq++;
 	}
 	else {
 		DPRINTK(ERR, "Process number is more than CPU number\n");
@@ -1647,6 +1656,7 @@ static int fsocket_open(struct inode *inode, struct file *filp)
 	filp->private_data = (void *)THIS_MODULE;
 
 	cpus_clear(cpuset);
+	cpuseq = 0;
 
 	return 0;
 }
