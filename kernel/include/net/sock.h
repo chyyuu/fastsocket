@@ -296,7 +296,6 @@ struct sock {
 	u32			sk_classid;
 	//XIAOFENG6
 	unsigned long		cpumask;
-	int 			sk_affinity_seq;
 	//XIAOFENG6
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk, int bytes);
