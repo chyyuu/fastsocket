@@ -33,7 +33,7 @@ extern int fsocket_get_dbg_level(void);
 
 #define DPRINTK(level, msg, args...) ({\
 	if (level < fsocket_get_dbg_level()) \
-		printk(KERN_DEBUG "[CPU%d] %s:%d\t" msg, smp_processor_id(), __FUNCTION__, __LINE__, ## args); \
+		printk(KERN_DEBUG "[CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args); \
 	})
 
 struct fsocket_alloc {
@@ -64,6 +64,7 @@ struct fsocket_ioctl_arg {
 		struct socket_accept_op_t {
 			void *sockaddr; /*user sockaddr address*/
 			int *sockaddr_len; /* user sockaddr address len*/
+			int flags;
 		}accept_op;
 
 		//struct socket_bind_op_t {

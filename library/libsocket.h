@@ -41,6 +41,7 @@ struct fsocket_ioctl_arg {
 		struct socket_accept_op_t {
 			void *sockaddr; /*user sockaddr address*/
 			int *sockaddr_len; /* user sockaddr address len*/
+			int flags;
 		}accept_op;
 
 		//struct socket_bind_op_t {

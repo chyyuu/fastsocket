@@ -991,6 +991,7 @@ struct file {
 	} f_u;
 	//XIAOFENG6
 	struct file 		*sub_file;         
+	struct file 		*old_file;         
 	struct epitem		*epoll_item;
 	//XIAOFENG6
 	struct path		f_path;

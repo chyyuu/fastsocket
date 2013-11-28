@@ -160,6 +160,7 @@ int accept(int fd, struct sockaddr *addr, socklen_t *addr_len)
 		arg.fd = fd;
 		arg.op.accept_op.sockaddr = addr;
 		arg.op.accept_op.sockaddr_len = addr_len;
+		arg.op.accept_op.flags = 0;
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_ACCEPT, &arg);
 		if (ret < 0 && errno != EAGAIN) {
@@ -175,6 +176,31 @@ int accept(int fd, struct sockaddr *addr, socklen_t *addr_len)
 	return ret;
 }
 
+int accept4(int fd, struct sockaddr *addr, socklen_t *addr_len, int flags)
+{
+	static int (*real_accept)(int, struct sockaddr *, socklen_t *) = NULL;
+	int ret = 0;
+	struct fsocket_ioctl_arg arg;
+
+	if (fsocket_channel_fd != 0) {
+		arg.fd = fd;
+		arg.op.accept_op.sockaddr = addr;
+		arg.op.accept_op.sockaddr_len = addr_len;
+		arg.op.accept_op.flags = flags;
+
+		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_ACCEPT, &arg);
+		if (ret < 0 && errno != EAGAIN) {
+			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Accept failed!\n");
+		}
+	} else {
+		if (!real_accept)
+			real_accept = dlsym(RTLD_NEXT, "accept4");
+		//ret =  SYSCALL(accept, fd, addr, addr_len);
+		ret = real_accept(fd, addr, addr_len);
+	}
+
+	return ret;
+}
 int close(int fd)
 {
 	static int (*real_close)(int) = NULL;
@@ -255,22 +281,24 @@ int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
 
 	if (fsocket_channel_fd != 0) {
 		arg.fd = fd;
-		arg.op.epoll_op.epoll_fd = efd;
-		arg.op.epoll_op.ep_ctl_cmd = cmd;
-		arg.op.epoll_op.ev = ev;
+		arg.op.spawn_op.cpu = -1;
 
 		if (fsocket_listen_fds[fd]) {
 			ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
 			if (ret < 0) {
-				FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Spawn failed!\n");
+				FSOCKET_DBG(FSOCKET_ERR, "FSOCKET: spawn failed!\n");
 				//FIXME: as of now, ignore the spawn err.
 				//return ret;
 			}
 		}
 
+		arg.op.epoll_op.epoll_fd = efd;
+		arg.op.epoll_op.ep_ctl_cmd = cmd;
+		arg.op.epoll_op.ev = ev;
+
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_EPOLL_CTL, &arg);
 		if (ret < 0) {
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:epoll_ctl failed!\n");
+			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET: epoll_ctl failed!\n");
 			return ret;
 		}	
 		
