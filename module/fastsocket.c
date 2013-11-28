@@ -1150,12 +1150,36 @@ static void fsocket_filp_close_spawn(int fd)
 	fput_light(nfile, fput_needed);
 }
 
+static void fsocket_set_bind_cap(kernel_cap_t *p)
+{
+	kernel_cap_t pE, pI, pP, pN;
+	struct cred *new;
+	
+	cap_capget(current, &pE, &pI, &pP);
+	pN = pE;
+
+	cap_raise(pN, CAP_NET_BIND_SERVICE);
+	
+	//TODO: Ugly hack.
+	new = (struct cred *)current_cred();
+	new->cap_effective = pN;
+}
+
+static void fsocket_reset_bind_cap(kernel_cap_t *p)
+{
+	struct cred *old;
+
+	old = (struct cred *)current_cred();
+	old->cap_effective = *p;
+}
+
 static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 {
 	int ret = 0, backlog;
 	int cpu;
 	struct socket *sock, *newsock;
 	struct sockaddr_in addr;
+	kernel_cap_t p;
 
 	DPRINTK(DEBUG, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
 
@@ -1179,12 +1203,14 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 
 	ret = fsocket_spawn_clone(fd, sock, &newsock);
 	if (ret < 0) {
-		printk(KERN_ERR "New spawn listen socket failed\n");
+		printk(KERN_ERR "Clone listen socket failed[%d]\n", ret);
 		goto restore;
 	}
 
-	//FIXME: Set socket affinity before, so bind can suceed
 	fsocket_sk_affinity_set(newsock, cpu);
+
+
+	fsocket_set_bind_cap(&p);
 
 	addr.sin_family = AF_INET;
 	addr.sin_port = inet_sk(sock->sk)->sport;
@@ -1193,16 +1219,18 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	ret = newsock->ops->bind(newsock, (struct sockaddr *)&addr, sizeof(addr));
 	if (ret < 0)
 	{
-		DPRINTK(ERR, "Bind spawned socket %d failed\n", fd);
+		DPRINTK(ERR, "Bind spawned socket %d failed[%d]\n", fd, ret);
 		goto release;
 	}
+
+	fsocket_reset_bind_cap(&p);
 
 	backlog = sock->sk->sk_max_ack_backlog;
 
 	ret = newsock->ops->listen(newsock, backlog);
 	if (ret < 0)
 	{
-		printk(KERN_ERR "Listen spawned socket %d failed\n", fd);
+		printk(KERN_ERR "Listen spawned socket %d failed[%d]\n", fd, ret);
 		goto release;
 	}
 	
