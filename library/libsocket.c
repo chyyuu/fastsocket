@@ -2,10 +2,10 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #include <sys/socket.h>
 #include <errno.h>
 #include <unistd.h>
+#include <linux/eventpoll.h>
 
 #define __USE_GNU
 #include <sched.h>
@@ -115,8 +115,6 @@ int listen(int fd, int backlog)
 
 		if (!fsocket_listen_fds[fd])
 			fsocket_listen_fds[fd] = 1;
-		else
-			return -1;
 
 		//ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_LISTEN, &arg);
 		ret =  real_listen(fd, backlog);
@@ -283,7 +281,7 @@ int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
 		arg.fd = fd;
 		arg.op.spawn_op.cpu = -1;
 
-		if (fsocket_listen_fds[fd]) {
+		if (fsocket_listen_fds[fd] && cmd == EPOLL_CTL_ADD) {
 			ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
 			if (ret < 0) {
 				FSOCKET_DBG(FSOCKET_ERR, "FSOCKET: spawn failed!\n");
