@@ -411,9 +411,7 @@ static struct socket *fsocket_alloc_socket(void)
 	static unsigned int last_ino = FSOCKET_INODE_START;
 
 	sock = (struct socket *)kmem_cache_alloc(socket_cachep, GFP_KERNEL);
-
 	if (sock != NULL) {
-
 		static const struct inode_operations empty_iops;
 		static const struct file_operations empty_fops;
 
@@ -450,11 +448,15 @@ static struct socket *fsocket_alloc_socket(void)
 
 		DPRINTK(DEBUG, "Allocat inode 0x%p\n", inode);
 	}
-
 	return sock;
 }
 
 #define DNAME_INLINE_LEN (sizeof(struct dentry)-offsetof(struct dentry,d_iname))
+
+static void fsock_d_free(struct dentry *dentry)
+{
+	kmem_cache_free(dentry_cache, dentry);
+}
 
 static struct dentry *fsock_d_alloc(struct socket *sock, struct dentry *parent, const struct qstr *name)
 {
@@ -520,7 +522,7 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 	fd = get_unused_fd_flags(flags);
 
 	if (unlikely(fd < 0)) {
-		printk(KERN_ERR "Get unused fd failed\n");
+		DPRINTK(ERR, "Socket 0x%p get unused fd failed\n", sock);
 		return fd;
 	}
 
@@ -528,7 +530,7 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 	
 	path.dentry = fsock_d_alloc(sock, NULL, &name);
 	if (unlikely(!path.dentry)) {
-		printk(KERN_ERR "Allocate dentry failed\n");
+		DPRINTK(ERR, "Socket 0x%p allocate dentry failed\n", sock);
 		put_unused_fd(fd);
 		return -ENOMEM;
 	}
@@ -538,16 +540,16 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 	SOCK_INODE(sock)->i_fop = &socket_file_ops;
 
 	file = get_empty_filp();
-	
-	DPRINTK(DEBUG, "Allocate file 0x%p\n", file);
-
 	if (unlikely(!file)) {
-		printk(KERN_ERR "Allocate empty file failed\n");
-		atomic_inc(&path.dentry->d_inode->i_count);
-		dput(path.dentry);
+		DPRINTK(ERR, "Socket 0x%p allocate empty file failed\n", sock);
+		//atomic_inc(&path.dentry->d_inode->i_count);
+		//dput(path.dentry);
+		fsock_d_free(path.dentry);
 		put_unused_fd(fd);
 		return -ENFILE;
 	}
+	
+	DPRINTK(DEBUG, "Allocate file 0x%p\n", file);
 
 	file->f_path = path;
 	file->f_mapping = path.dentry->d_inode->i_mapping;
@@ -574,7 +576,6 @@ static int fsock_map_fd(struct socket *sock, int flags)
 	struct file *newfile;
 
 	int fd = fsock_alloc_file(sock, &newfile, flags);
-
 	if (likely(fd >= 0))
 		fd_install(fd, newfile);
 
