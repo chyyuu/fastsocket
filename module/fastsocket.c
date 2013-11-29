@@ -148,16 +148,13 @@ static inline unsigned int fast_sock_poll(struct file *file, poll_table *wait)
 		if (sock->ops) {
 			if (sock->ops->poll) {
 				return sock->ops->poll(file, sock, wait);
-			}
-			else {
+			} else {
 				DPRINTK(ERR, "No poll method for file 0x%p inode 0x%p", file, SOCK_INODE(sock));
 			}
-		}
-		else {
+		} else {
 			DPRINTK(ERR, "No ops for file 0x%p socket 0x%p", file, sock);
 		}
-	}
-	else {
+	} else {
 		DPRINTK(ERR, "No socket method for file 0x%p\b", file);
 	}
 
@@ -331,16 +328,14 @@ static int __fsocket_filp_close(struct file *file)
 		if (dentry) {
 			DPRINTK(DEBUG, "Release dentry 0x%p[%d]\n", dentry, atomic_read(&dentry->d_count));
 			DPRINTK(DEBUG, "Release inode 0x%p[%d]\n", dentry->d_inode, atomic_read(&dentry->d_inode->i_count));
-		}
-		else {
+		} else {
 			DPRINTK(ERR, "No dentry for file 0x%p\n", file);
 		}
 
 		dput(dentry);
 		return 0;
 
-	}
-	else {
+	} else {
 		DPRINTK(DEBUG, "Next time to release file 0x%p[%ld]\n", file, atomic_long_read(&file->f_count));
 		return 1;
 	}
@@ -474,7 +469,7 @@ static struct dentry *fsock_d_alloc(struct socket *sock, struct dentry *parent, 
 		dname = kmalloc(name->len + 1, GFP_KERNEL);
 		if (!dname)
 			return NULL;
-	} else  {
+	} else {
 		dname = dentry->d_iname;
 	}
 
@@ -1116,8 +1111,7 @@ static int fsocket_process_affinity_check(void)
 	if (tcpu >= 0) {
 		cpu_set(cpu, spawn_cpuset);
 		spawn_cpu++;
-	}
-	else {
+	} else {
 		DPRINTK(ERR, "Process number is more than CPU number\n");
 		//mutex_unlock(&cpumutex);
 		return -EINVAL;
@@ -1328,6 +1322,7 @@ static inline int fsocket_global_accept(struct socket *sock, struct socket *news
 
 	percpu_add(global_spawn_accept, 1);
 
+	//FIXME: Is the policy good?
 	if (percpu_read(global_spawn_accept) & 0x1) {
 		ret = sock->ops->accept(sock, newsock, flags);
 		if (!ret)
@@ -1350,6 +1345,7 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 	//struct tcp_sock *tp;
 	struct inet_connection_sock *icsk;
 
+	//FIXME: Maybe unsafe for CLOEXEC flag
  	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK)) {
 		DPRINTK(ERR, "Unsupported flags for file 0x%p\n", file);
 		err = -EINVAL;
@@ -1374,21 +1370,19 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 	newsock->type = SOCK_STREAM;
 	newsock->ops = sock->ops;
 
-	//Make it NONBLOCK for Fastsocket
 	newfd = fsock_alloc_file(newsock, &newfile, O_NONBLOCK | flags);
 	if (unlikely(newfd < 0)) {
 		printk(KERN_ERR "Allocate file for new socket failed\n");
 		err = newfd;
-		fsock_release_sock(newsock);
+		//fsock_release_sock(newsock);
+		fsock_free_sock(newsock);
 		goto out;
 	}
 
 	if (!file->sub_file) {
 		DPRINTK(DEBUG, "File 0x%p has no sub file, Do common accept\n", file);
 		err = fsocket_common_accept(sock, newsock, O_NONBLOCK);
-	}
-	else {
-
+	} else {
 		DPRINTK(DEBUG, "File 0x%p has sub file 0x%p, Do spawn accept\n", file, file->sub_file);
 		icsk = inet_csk(sock->sk);
 		lsock = (struct socket *)file->sub_file->private_data;
@@ -1405,17 +1399,15 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 				DPRINTK(DEBUG, "Check local listen socket 0x%p again\n", lsock);
 				err = fsocket_local_accept(lsock, newsock, O_NONBLOCK);
 			}
-		}
-		else {
+		} else {
 			DPRINTK(DEBUG, "Accept local listen socket 0x%p\n", lsock);
 			err = fsocket_local_accept(lsock, newsock, O_NONBLOCK);
 		}
 	}
 
-	if (err < 0)
-	{	
-		//if (err != -EAGAIN)
-		//	printk(KERN_ERR "Accept failed [%d]\n", err);
+	if (err < 0) {
+		if (err != -EAGAIN)
+			DPRINTK(ERR, "Accept failed [%d]\n", err);
 		goto out_fd;
 	}
 
@@ -1427,16 +1419,9 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		}
 
 		err = move_addr_to_user((struct sockaddr *)&address, len, upeer_sockaddr, upeer_addrlen);
-
 		if (err < 0)
 			goto out_fd;
 	}
-
-	//sock_set_flag(sock->sk, SOCK_LWS);
-
-	//tp = tcp_sk(sock->sk);
-	//TODO: Default TCP OPT For Fastsocket.
-	//tp->nonagle |= TCP_NAGLE_OFF | TCP_NAGLE_PUSH;
 
 	fd_install(newfd, newfile);
 	err = newfd;
@@ -1474,8 +1459,7 @@ int fastsocket_accept(struct fsocket_ioctl_arg *u_arg)
 		DPRINTK(DEBUG, "Accept fastsocket %d\n", arg.fd);
 		ret = fsocket_spawn_accept(tfile, arg.op.accept_op.sockaddr, 
 				arg.op.accept_op.sockaddr_len, arg.op.accept_op.flags);
-	}
-	else {
+	} else {
 		DPRINTK(INFO, "Accept non-fastsocket %d\n", arg.fd);
 		ret = sys_accept(arg.fd, arg.op.accept_op.sockaddr, arg.op.accept_op.sockaddr_len);
 	}
@@ -1503,8 +1487,7 @@ static int fastsocket_socket(struct fsocket_ioctl_arg *u_arg)
 		fd = fsocket_socket(type & ~SOCK_TYPE_MASK);
 		DPRINTK(DEBUG,"Create fastsocket %d\n", fd);
 		return fd;
-	}
-	else { 
+	} else { 
 		fd = sys_socket(family, type, protocol);
 		DPRINTK(INFO, "Create non fastsocket %d\n", fd);
 		return fd;
@@ -1534,8 +1517,7 @@ static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
 		fput_light(tfile, fput_need);
 		error = fsocket_close(arg.fd);
-	}
-	else {
+	} else {
 		fput_light(tfile, fput_need);
 		DPRINTK(INFO, "Close non fastsocket %d\n", arg.fd);
 		error = sys_close(arg.fd);
