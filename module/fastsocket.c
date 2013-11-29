@@ -1010,8 +1010,15 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 		if (epi)
 			error = fsocket_ep_remove(ep, epi);
 			if (sfile && !error) {
+				struct epitem *sepi;
+				error = -ENOENT;
+
 				DPRINTK(DEBUG, "Remove spawned listen socket %d\n", fd);
-				error = fsocket_ep_remove(ep, epi);
+				sepi = sfile->epoll_item;
+				if (sepi)
+					error = fsocket_ep_remove(ep, sepi);
+				else
+					DPRINTK(ERR, "No sub epoll item for socket %d\n", fd);
 			}
 		else
 			error = -ENOENT;
@@ -1183,6 +1190,12 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 
 	DPRINTK(DEBUG, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
 
+	if (filp->sub_file) {
+		DPRINTK(ERR, "Spawn on a already spawned file 0x%p\n", filp);
+		ret = -EEXIST;
+		goto out;
+	}
+
 	mutex_lock(&spawn_mutex);
 	
 	ret = fsocket_process_affinity_check();
@@ -1195,11 +1208,6 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	cpu = ret;
 
 	sock  = (struct socket *)filp->private_data;
-	if (sock == NULL) {
-		DPRINTK(ERR, "No socket for this file\n");
-		ret = -EBADF;
-		goto restore;
-	}	
 
 	ret = fsocket_spawn_clone(fd, sock, &newsock);
 	if (ret < 0) {
@@ -1432,6 +1440,8 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 
 	fd_install(newfd, newfile);
 	err = newfd;
+
+	DPRINTK(DEBUG, "Accept file 0x%p new fd %d\n", file, newfd);
 
 	goto out;
 
