@@ -1335,8 +1335,6 @@ static inline int fsocket_global_accept(struct socket *sock, struct socket *news
 	return -EAGAIN;
 }
 
-const struct super_operations *s_op;
-
 static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upeer_sockaddr, 
 		int __user *upeer_addrlen, int flags)
 {
@@ -1754,7 +1752,7 @@ static int fsocket_open(struct inode *inode, struct file *filp)
 
 	DPRINTK(INFO, "Hold module reference\n");
 
-	filp->private_data = (void *)THIS_MODULE;
+	//filp->private_data = (void *)THIS_MODULE;
 
 	cpus_clear(spawn_cpuset);
 	spawn_cpu = 0;
@@ -1764,7 +1762,8 @@ static int fsocket_open(struct inode *inode, struct file *filp)
 
 static int fsocket_release(struct inode *inode, struct file *filp)
 {
-	module_put(filp->private_data);
+	//module_put(filp->private_data);
+	module_put(THIS_MODULE);
 	
 	DPRINTK(INFO, "Release module reference\n");
 
@@ -1779,7 +1778,7 @@ static const struct file_operations fastsocket_fops = {
 
 static struct miscdevice fastsocket_dev = {
 	.minor = MISC_DYNAMIC_MINOR,
-	.name = "fastsocket_channel",
+	.name = "fastsocket",
 	.fops = &fastsocket_fops ,
 	.mode = S_IRUGO,
 };
@@ -1799,8 +1798,6 @@ static int __init  fastsocket_init(void)
 			num_online_cpus(), num_possible_cpus(),
 			num_present_cpus(), num_active_cpus());
 
-	DPRINTK(INFO, "Size of cpuset %ld\n", sizeof(cpumask_t));
-	
 	ret = misc_register(&fastsocket_dev);
 	if (ret < 0) {
 		DPRINTK(ERR, "Register fastsocket channel device failed\n");
@@ -1808,7 +1805,8 @@ static int __init  fastsocket_init(void)
 	}
 
 	socket_cachep = kmem_cache_create("fastsocket_socket_cache", sizeof(struct fsocket_alloc), 0, 
-			SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT | SLAB_PANIC, init_once);
+			SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT | 
+			SLAB_MEM_SPREAD | SLAB_PANIC, init_once);
 
 	ret = register_filesystem(&fastsock_fs_type);
 	if (ret) {
@@ -1819,8 +1817,6 @@ static int __init  fastsocket_init(void)
 
 	sock_mnt = kern_mount(&fastsock_fs_type);
 	DPRINTK(DEBUG, "Fastsocket super block 0x%p ops 0x%p\n", sock_mnt->mnt_sb, sock_mnt->mnt_sb->s_op);
-
-	s_op = sock_mnt->mnt_sb->s_op;
 
 	if (IS_ERR(sock_mnt)) {
 		DPRINTK(ERR, "Mount fastsocket filesystem failed\n");

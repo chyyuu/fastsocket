@@ -42,7 +42,7 @@ void fastsocket_init(void)
 	int i;
 	cpu_set_t cmask;
 
-	ret = open("/dev/fastsocket_channel", O_RDONLY);
+	ret = open("/dev/fastsocket", O_RDONLY);
 	if (ret < 0) {
 		FSOCKET_DBG(FSOCKET_ERR, "Open fastsocket channel failed, please CHECK\n");
 		exit(-1);
