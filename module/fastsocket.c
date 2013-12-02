@@ -1310,6 +1310,8 @@ static inline int fsocket_common_accept(struct socket *sock, struct socket *news
 	ret =  sock->ops->accept(sock, newsock, flags);
 	if (!ret)
 		__get_cpu_var(hash_stats).common_accept++;
+	else
+		__get_cpu_var(hash_stats).common_accept_failed++;
 
 	return ret;
 }
@@ -1321,6 +1323,8 @@ static inline int fsocket_local_accept(struct socket *sock, struct socket *newso
 	ret = sock->ops->accept(sock, newsock, flags);
 	if (!ret)
 		__get_cpu_var(hash_stats).local_accept++;
+	else
+		__get_cpu_var(hash_stats).local_accept_failed++;
 
 	return ret;
 }
@@ -1336,6 +1340,8 @@ static inline int fsocket_global_accept(struct socket *sock, struct socket *news
 		ret = sock->ops->accept(sock, newsock, flags);
 		if (!ret)
 			__get_cpu_var(hash_stats).global_accept++;
+		else
+			__get_cpu_var(hash_stats).global_accept_failed++;
 		return ret;
 	}
 	return -EAGAIN;

@@ -39,7 +39,6 @@ extern int fsocket_get_dbg_level(void);
 struct fsocket_alloc {
 	struct socket socket;
 	struct inode vfs_inode;
-	//struct dentry vfs_dentry;
 };
 
 static inline struct inode *SOCKET_INODE(struct socket *socket)
@@ -51,11 +50,6 @@ static inline struct socket *INODE_SOCKET(struct inode *inode)
 {
 	return &container_of(inode, struct socket_alloc, vfs_inode)->socket;
 }
-
-struct read_sock_arg {
-	char __user *buf;
-	int size;
-};
 
 struct fsocket_ioctl_arg {
 	u32 fd;
