@@ -249,6 +249,10 @@ static inline int ep_op_has_event(int op)
 //XIAOFENG6
 
 extern int ep_remove(struct eventpoll *ep, struct epitem *epi);
+extern int ep_insert(struct eventpoll *ep, struct epoll_event *event, 
+		struct file *tfile, int fd);
+extern int ep_modify(struct eventpoll *ep, struct epitem *epi, 
+		struct epoll_event *event);
 extern void ep_poll_safewake(wait_queue_head_t *wq);
 extern int ep_alloc(struct eventpoll **pep);
 extern void ep_free(struct eventpoll *ep);

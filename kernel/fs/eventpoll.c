@@ -235,6 +235,12 @@ struct ep_send_events_data {
 #endif
 //XIAOFENG6
 
+//XIAOFENG6
+int enable_fastsocket_epoll = 0;
+EXPORT_SYMBOL(enable_fastsocket_epoll);
+//XIAOFENG6
+
+
 /*
  * Configuration options available inside /proc/sys/fs/epoll/
  */
@@ -575,6 +581,10 @@ int ep_remove(struct eventpoll *ep, struct epitem *epi)
 	unsigned long flags;
 	struct file *file = epi->ffd.file;
 
+	//XIAOFENG6
+	file->epoll_item = NULL;
+	//XIAOFENG6
+
 	/*
 	 * Removes poll wait queue hooks. We _have_ to do this without holding
 	 * the "ep->lock" otherwise a deadlock might occur. This because of the
@@ -900,6 +910,7 @@ out_unlock:
  * This is the callback that is used to add our wait queue to the
  * target file wakeup lists.
  */
+
 void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 				 poll_table *pt)
 {
@@ -911,7 +922,7 @@ void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 		pwq->whead = whead;
 		pwq->base = epi;
 		//XIAOFENG6
-		if (file->f_mode & FMODE_FASTSOCKET)
+		if ((file->f_mode & FMODE_FASTSOCKET) && enable_fastsocket_epoll)
 			pwq->wait.flags |= WQ_FLAG_LOADBALANCE;
 		//XIAOFENG6
 		add_wait_queue(whead, &pwq->wait);
@@ -972,6 +983,11 @@ int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	epi->event = *event;
 	epi->nwait = 0;
 	epi->next = EP_UNACTIVE_PTR;
+
+	//XIAOFENG6
+	if ((tfile->f_mode & FMODE_FASTSOCKET) && enable_fastsocket_epoll)
+		tfile->epoll_item = epi;
+	//XIAOFENG6
 
 	/* Initialize the poll table using the queue callback */
 	epq.epi = epi;
@@ -1048,6 +1064,9 @@ error_unregister:
 
 	return error;
 }
+//XIAOFEDNG6
+EXPORT_SYMBOL(ep_insert);
+//XIAOFEDNG6
 
 /*
  * Modify the interest event mask by dropping an event if the new mask
@@ -1096,6 +1115,9 @@ int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *even
 
 	return 0;
 }
+//XIAOFEDNG6
+EXPORT_SYMBOL(ep_modify);
+//XIAOFEDNG6
 
 static int ep_send_events_proc(struct eventpoll *ep, struct list_head *head,
 			       void *priv)
@@ -1350,6 +1372,10 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	struct epitem *epi;
 	struct epoll_event epds;
 
+	//XIAOFENG6
+	struct socket *sock;
+	//XIAOFENG6
+
 	error = -EFAULT;
 	if (ep_op_has_event(op) &&
 	    copy_from_user(&epds, event, sizeof(struct epoll_event)))
@@ -1412,7 +1438,15 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	 * above, we can be sure to be able to use the item looked up by
 	 * ep_find() till we release the mutex.
 	 */
-	epi = ep_find(ep, tfile, fd);
+
+	//XIAOFENG6
+	sock = (struct socket *)tfile->private_data;
+	if (tfile->f_mode & FMODE_FASTSOCKET && enable_fastsocket_epoll && 
+			sock->sk->sk_state != TCP_LISTEN)
+		epi = tfile->epoll_item;
+	else
+		epi = ep_find(ep, tfile, fd);
+	//XIAOFENG6
 
 	error = -EINVAL;
 	switch (op) {

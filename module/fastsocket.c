@@ -34,16 +34,20 @@ MODULE_AUTHOR("Xiaofeng Lin <sina.com>, SiXing Xiao <sina.com>");
 
 MODULE_DESCRIPTION("Fast socket kernel module");
 
-static int fsocket_debug_level = 5;
+static int fsocket_debug_level = 3;
 static int enable_listen_spawn = 0;
 extern int enable_receive_flow_deliver;
+extern int enable_fastsocket_epoll;
 
 module_param(fsocket_debug_level,int, 0);
 module_param(enable_listen_spawn, int, 0);
 module_param(enable_receive_flow_deliver, int, 0);
+module_param(enable_fastsocket_epoll, int, 0);
 
-MODULE_PARM_DESC(enable_listen_spawn, " Control listen-spawn behavior: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity");
-MODULE_PARM_DESC(fsocket_debug_level, " Debug level (0-6)");
+MODULE_PARM_DESC(fsocket_debug_level, " Debug level [0-6]" );
+MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale[Default], 1 = Process affinity required, 2 = Autoset process affinity ");
+MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled ");
+MODULE_PARM_DESC(enable_fastsocket_epoll, " Control Fastsocket-Epoll: 0 = Disbale[Default], 1 = Enabled ");
 
 int fsocket_get_dbg_level(void)
 {
@@ -788,6 +792,8 @@ out:
 	return err;
 }
 
+#if 0
+
 static int fsocket_ep_insert(struct eventpoll *ep, struct epoll_event *event, struct file *tfile, int fd)
 {
 	int error, revents, pwake = 0;
@@ -976,6 +982,8 @@ static int fsocket_ep_modify(struct eventpoll *ep, struct epitem *epi, struct ep
 	return 0;
 }
 
+#endif
+
 static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  int op,  struct __user epoll_event *ev)
 {
 	int error = -EINVAL;
@@ -998,11 +1006,12 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
   	 */
 
 	//if (unlikely(sock->sk->sk_state == TCP_LISTEN))
-	//	epi = ep_find(ep, tfile, fd);
-	//else
-	//	epi = tfile->epoll_item;
+	if (!enable_fastsocket_epoll)
+		epi = ep_find(ep, tfile, fd);
+	else
+		epi = tfile->epoll_item;
 	
-	epi = tfile->epoll_item;
+	//epi = tfile->epoll_item;
 
 	sfile = tfile->sub_file;
 
@@ -1010,17 +1019,20 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 	case EPOLL_CTL_ADD:
 		if (!epi) {
 			epds.events |= POLLERR | POLLHUP;
-			error = fsocket_ep_insert(ep, &epds, tfile, fd);
+			//error = fsocket_ep_insert(ep, &epds, tfile, fd);
+			error = ep_insert(ep, &epds, tfile, fd);
 			if (sfile && !error) {
 				DPRINTK(DEBUG, "Insert spawned listen socket %d\n", fd);
-				error = fsocket_ep_insert(ep, &epds, sfile, fd);
+				//error = fsocket_ep_insert(ep, &epds, sfile, fd);
+				error = ep_insert(ep, &epds, sfile, fd);
 			}
 		} else
 			error = -EEXIST;
 		break;
 	case EPOLL_CTL_DEL:
 		if (epi)
-			error = fsocket_ep_remove(ep, epi);
+			//error = fsocket_ep_remove(ep, epi);
+			error = ep_remove(ep, epi);
 			if (sfile && !error) {
 				struct epitem *sepi;
 				error = -ENOENT;
@@ -1028,7 +1040,8 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 				DPRINTK(DEBUG, "Remove spawned listen socket %d\n", fd);
 				sepi = sfile->epoll_item;
 				if (sepi)
-					error = fsocket_ep_remove(ep, sepi);
+					//error = fsocket_ep_remove(ep, sepi);
+					error = ep_remove(ep, sepi);
 				else
 					DPRINTK(ERR, "No sub epoll item for socket %d\n", fd);
 			}
@@ -1038,10 +1051,12 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 	case EPOLL_CTL_MOD:
 		if (epi) {
 			epds.events |= POLLERR | POLLHUP;
-			error = fsocket_ep_modify(ep, epi, &epds);
+			//error = fsocket_ep_modify(ep, epi, &epds);
+			error = ep_modify(ep, epi, &epds);
 			if (sfile && !error) {
 				DPRINTK(DEBUG, "Modify spawned listen socket %d\n", fd);
-				error = fsocket_ep_modify(ep, epi, &epds);
+				//error = fsocket_ep_modify(ep, epi, &epds);
+				error = ep_modify(ep, epi, &epds);
 			}
 		} else
 			error = -ENOENT;
@@ -1553,11 +1568,23 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 	struct eventpoll *ep;
 	int e_fput_need, t_fput_need, ret;
 
+	DPRINTK(DEBUG, "Epoll_ctl socket %d\n", arg.fd);
+
 	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
 		DPRINTK(ERR, "copy ioctl parameter from user space to kernel failed\n");
 		return -EFAULT;
 	}
-	
+
+	/* Only use module epoll_ctl when listen spawn is enabled,
+	 * fastepoll is taken care of by kernel source.
+	 */
+	if (!enable_listen_spawn) {
+		DPRINTK(DEBUG, "Fastsocket epoll is disabled\n");
+		ret = sys_epoll_ctl(arg.op.epoll_op.epoll_fd, arg.op.epoll_op.ep_ctl_cmd, 
+				arg.fd, arg.op.epoll_op.ev);
+		return ret;
+	}
+		
 	efile = fget_light(arg.op.epoll_op.epoll_fd, &e_fput_need);
 	if (efile == NULL) {
 		DPRINTK(ERR, "epoll file don't exist!\n");
@@ -1573,12 +1600,9 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 		return -EINVAL;
 	}
 
-	DPRINTK(DEBUG, "Epoll_ctl socket %d\n", arg.fd);
-
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
 		ret = fsocket_epoll_ctl(ep, tfile, arg.fd, arg.op.epoll_op.ep_ctl_cmd, 
 				arg.op.epoll_op.ev);
-
 	} else {
 		DPRINTK(INFO, "Target socket %d is Not Fastsocket\n", arg.fd);
 		ret = sys_epoll_ctl(arg.op.epoll_op.epoll_fd, arg.op.epoll_op.ep_ctl_cmd, 
