@@ -2840,9 +2840,9 @@ out:
 }
 
 //XIAOFENG6
-static DEFINE_PER_CPU(struct netif_steer_stats, steer_stats);
+static DEFINE_PER_CPU(struct netif_deliver_stats, deliver_stats);
 
-static int netif_steer_cpu(unsigned short dport)	
+static int netif_deliver_cpu(unsigned short dport)	
 {
 	int cur_cpu = smp_processor_id();
 	int cpu_num = num_active_cpus();
@@ -2851,62 +2851,55 @@ static int netif_steer_cpu(unsigned short dport)
 
 	unsigned int mask;
 
-	__get_cpu_var(steer_stats).steer++;
-
+	__get_cpu_var(deliver_stats).steer++;
 	round_cpu_num = cpu_num;
 
 	if (!is_power_of_2(cpu_num))
 		round_cpu_num = roundup_pow_of_two(cpu_num);
 
 	mask = round_cpu_num - 1;
-
 	new_cpu = dport & mask;
 
-	if (new_cpu >= cpu_num)
-	{
+	if (new_cpu >= cpu_num) {
 		DPRINTK(ERR, "masked destination port [%d]beyond local CPU mask [%d-%d]\n", 
 			new_cpu, cpu_num, round_cpu_num);
 
-		__get_cpu_var(steer_stats).steer_err++;
+		__get_cpu_var(deliver_stats).steer_err++;
 
 		return -1;
 	}
-	if (new_cpu == cur_cpu)
-	{
+	if (new_cpu == cur_cpu) {
 		DPRINTK(INFO, "God helps, packet match local CPU, no need to steer\n");
-		__get_cpu_var(steer_stats).steer_save++;
+		__get_cpu_var(deliver_stats).steer_save++;
 
 		return -1;
 	}
 
 	DPRINTK(INFO, "Packet id steered to CPU %d\n", new_cpu);
 
-	__get_cpu_var(steer_stats).steer_done++;
+	__get_cpu_var(deliver_stats).steer_done++;
 
 	return new_cpu;
 }
 
-static int netif_steer_skb(struct sk_buff *skb)
+#define RESERVED_SERVICE_PORT	1024
+
+static int netif_deliver_skb(struct sk_buff *skb)
 {
-	if (skb->protocol == htons(ETH_P_IP))
-	{
+	if (skb->protocol == htons(ETH_P_IP)) {
 	    struct iphdr *iph;
 	    int iphl;
 
-	    if (pskb_may_pull(skb, sizeof(*iph)))
-	    {
+	    if (pskb_may_pull(skb, sizeof(*iph))) {
 		u8 ip_proto;
-
 		iph = (struct iphdr *) skb->data;
 		ip_proto = iph->protocol;
 		iphl = iph->ihl;
 
-		if (ip_proto == IPPROTO_TCP)
-		{
+		if (ip_proto == IPPROTO_TCP) {
 		    struct tcphdr *th;
 
-		    if (pskb_may_pull(skb, (iphl * 4) + sizeof(*th)))
-		    {
+		    if (pskb_may_pull(skb, (iphl * 4) + sizeof(*th))) {
 			struct sock *sk;
 
 			th = (struct tcphdr *)(skb->data + (iphl * 4));
@@ -2915,39 +2908,34 @@ static int netif_steer_skb(struct sk_buff *skb)
 				NIPQUAD(iph->saddr), ntohs(th->source),
 				NIPQUAD(iph->daddr), ntohs(th->dest));
 
-			if (ntohs(th->source) < 1024)
-			{
+			if (ntohs(th->source) < RESERVED_SERVICE_PORT) {
 				DPRINTK(INFO, "Packet source port < 1024, indicates it's from server\n");
 
-				return netif_steer_cpu(ntohs(th->dest));
+				return netif_deliver_cpu(ntohs(th->dest));
 			}
 
-			if (ntohs(th->dest) < 1024)
-			{
+			if (ntohs(th->dest) < RESERVED_SERVICE_PORT) {
 				DPRINTK(INFO, "Packet dest port < 1024, indicates it's from client\n");
 
-				__get_cpu_var(steer_stats).pass++;
+				__get_cpu_var(deliver_stats).pass++;
 
 				return -1;
 			}
 
 			sk = __inet_lookup_listener(&init_net, &tcp_hashinfo, iph->daddr, ntohs(th->dest), skb->dev->ifindex);
 
-			if (sk)
-			{		
+			if (sk) {		
 				DPRINTK(INFO, "Packet match listen socket, indicates it's from client\n");
 
 				skb->sk = sk;
-				__get_cpu_var(steer_stats).pass++;
+				__get_cpu_var(deliver_stats).pass++;
 
 				return -1;
-			}
-			else
-			//FIXME: Be more carefully to steer the packet, mis-steering can cause load imbalanced problem
-			//FIXME: Shoudl we lookup established table so make sure?
-			{
+			} else {
+			//FIXME: Be careful to steer the packet, mis-steering can cause load balance problem
+			//FIXME: Should we lookup established table to make sure?
 				DPRINTK(INFO, "Packet not match listen socket, indicates it's from server\n");
-				return netif_steer_cpu(ntohs(th->dest));
+				return netif_deliver_cpu(ntohs(th->dest));
 			}
 		    }
 		}
@@ -2984,7 +2972,7 @@ int netif_receive_skb(struct sk_buff *skb)
 
 	//XIAOFENG6
 	if (enable_receive_flow_deliver)
-		cpu = netif_steer_skb(skb);
+		cpu = netif_deliver_skb(skb);
 	else
 		cpu = get_rps_cpu(skb->dev, skb, &rflow);
 	//XIAOFENG6
@@ -3980,13 +3968,13 @@ static const struct file_operations ptype_seq_fops = {
 //XIAOFENG6
 static volatile unsigned steer_cpu_id;
 
-static struct netif_steer_stats *steer_get_online(loff_t *pos)
+static struct netif_deliver_stats *steer_get_online(loff_t *pos)
 {
-	struct netif_steer_stats *rc = NULL;
+	struct netif_deliver_stats *rc = NULL;
 
 	while (*pos < nr_cpu_ids)
 		if (cpu_online(*pos)) {
-			rc = &per_cpu(steer_stats, *pos);
+			rc = &per_cpu(deliver_stats, *pos);
 			break;
 		} else
 			++*pos;
@@ -4018,7 +4006,7 @@ static void *steer_seq_start(struct seq_file *seq, loff_t *pos)
 
 static int steer_seq_show(struct seq_file *seq, void *v)
 {
-	struct netif_steer_stats *s = v;
+	struct netif_deliver_stats *s = v;
 
 	seq_printf(seq, "%u\t%-15lu%-15lu%-15lu%-15lu%-15lu\n", 
 		steer_cpu_id, s->pass, s->steer, s->steer_done, s->steer_save, s->steer_err);
@@ -4043,7 +4031,7 @@ ssize_t steer_reset(struct file *file, const char __user *buf, size_t size, loff
 	int cpu;
 
 	for_each_online_cpu(cpu)
-		memset(&per_cpu(steer_stats, cpu), 0, sizeof(struct netif_steer_stats));
+		memset(&per_cpu(deliver_stats, cpu), 0, sizeof(struct netif_deliver_stats));
 
 	return 1;
 }
