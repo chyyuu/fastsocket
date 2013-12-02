@@ -330,6 +330,7 @@ static int __fsocket_filp_close(struct file *file)
 			DPRINTK(DEBUG, "Release inode 0x%p[%d]\n", dentry->d_inode, atomic_read(&dentry->d_inode->i_count));
 		} else {
 			DPRINTK(ERR, "No dentry for file 0x%p\n", file);
+			return 1;
 		}
 
 		dput(dentry);
@@ -352,6 +353,8 @@ static inline int fsocket_filp_close(struct file *file)
 	DPRINTK(DEBUG, "Close file 0x%p\n", file);
 
 	retval = __fsocket_filp_close(file);
+
+	//FIXME: To close sub file and old file after close file successfully? Or the other way around.
 
 	if (sfile && !retval) {
 		DPRINTK(DEBUG, "Close sub file 0x%p\n", sfile);
@@ -1187,11 +1190,19 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	struct sockaddr_in addr;
 	kernel_cap_t p;
 
-	DPRINTK(DEBUG, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
+	DPRINTK(INFO, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
 
 	if (filp->sub_file) {
 		DPRINTK(ERR, "Spawn on a already spawned file 0x%p\n", filp);
 		ret = -EEXIST;
+		goto out;
+	}
+
+	sock  = (struct socket *)filp->private_data;
+
+	if (sock->sk->sk_state != TCP_LISTEN) {
+		DPRINTK(ERR, "Spawn on a non-listen socket file 0x%p\n", filp);
+		ret = -EINVAL;
 		goto out;
 	}
 
@@ -1205,8 +1216,6 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	}
 
 	cpu = ret;
-
-	sock  = (struct socket *)filp->private_data;
 
 	ret = fsocket_spawn_clone(fd, sock, &newsock);
 	if (ret < 0) {
@@ -1336,13 +1345,9 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		int __user *upeer_addrlen, int flags)
 {
 	int err = 0, newfd, len;
-
 	struct socket *sock, *newsock, *lsock;
 	struct sockaddr_storage address;
-
 	struct file *newfile;
-
-	//struct tcp_sock *tp;
 	struct inet_connection_sock *icsk;
 
 	//FIXME: Maybe unsafe for CLOEXEC flag
