@@ -814,16 +814,21 @@ static int fsocket_ep_insert(struct eventpoll *ep, struct epoll_event *event, st
 	epi->nwait = 0;
 	epi->next = EP_UNACTIVE_PTR;
 	
-	/* save epitem in file struct */
+	/* save epitem in file struct -- XIAOFENG6 */
 	tfile->epoll_item = epi;
 
 	/* Initialize the poll table using the queue callback */
 	epq.epi = epi;
 	init_poll_funcptr(&epq.pt, ep_ptable_queue_proc);
 
-	//XIAOFENG6
+	/*
+	 * Attach the item to the poll hooks and get current event bits.
+	 * We can safely use the file* here because its usage count has
+	 * been increased by the caller of this function. Note that after
+	 * this operation completes, the poll callback can start hitting
+	 * the new item.
+	 */
 	revents = tfile->f_op->poll(tfile, &epq.pt);
-	//XIAOFENG6
 
 	/*
  	 * We have to check if something went wrong during the poll wait queue
@@ -899,6 +904,7 @@ static int fsocket_ep_remove(struct eventpoll *ep, struct epitem *epi)
 
 	DPRINTK(DEBUG, "%s\n", __func__);
 
+	/* Clear stored epoll item -- XIAOFENG6 */
 	file->epoll_item = NULL;
 
 	ep_unregister_pollwait(ep, epi);
@@ -977,7 +983,7 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 	struct epitem *epi;
 	struct epoll_event epds;
 
-	struct socket *sock = (struct socket *)tfile->private_data;
+	//struct socket *sock = (struct socket *)tfile->private_data;
 	struct file *sfile;
 
 	if (copy_from_user(&epds, ev, sizeof(struct epoll_event)))
@@ -990,10 +996,13 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 	/*
   	 * save epitem object pointer in file struct
   	 */
-	if (unlikely(sock->sk->sk_state == TCP_LISTEN))
-		epi = ep_find(ep, tfile, fd);
-	else
-		epi = tfile->epoll_item;
+
+	//if (unlikely(sock->sk->sk_state == TCP_LISTEN))
+	//	epi = ep_find(ep, tfile, fd);
+	//else
+	//	epi = tfile->epoll_item;
+	
+	epi = tfile->epoll_item;
 
 	sfile = tfile->sub_file;
 
