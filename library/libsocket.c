@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <unistd.h>
+#include <string.h>
 #include <linux/eventpoll.h>
 
 #define __USE_GNU
@@ -15,20 +16,18 @@
 
 static int fsocket_channel_fd = -1;
 
-#define SYSCALL_DEFINE(name, ...) __wrap_##name(__VA_ARGS__)
-#define SYSCALL(name, ...)  __real_##name(__VA_ARGS__)
-
-
 #define FSOCKET_DBG(level, msg, ...) \
 do {\
 	fprintf(stderr, "FATSOCKET LIBRARY:" msg, ##__VA_ARGS__);\
 }while(0)
 
-#define MAX_LISTEN_FD	65536
+#define INIT_FDSET_NUM	64
 
 //TODO: Need Lock for Multi-thread programme
 
-static int fsocket_listen_fds[MAX_LISTEN_FD];
+//static int fsocket_fd_set[INIT_FDSET_NUM];
+static int *fsocket_fd_set;
+static int fsocket_fd_num;
 
 inline int get_cpus()
 {
@@ -49,8 +48,16 @@ void fastsocket_init(void)
 	}
 	fsocket_channel_fd = ret;
 
-	for (i = 0; i < MAX_LISTEN_FD; i++)
-		fsocket_listen_fds[i] = 0;
+	fsocket_fd_set = calloc(INIT_FDSET_NUM, sizeof(int));
+	if (!fsocket_fd_set) {
+		FSOCKET_DBG(FSOCKET_ERR, "Allocate memory for listen fd set failed\n");
+		exit(-1);
+	}
+
+	fsocket_fd_num = INIT_FDSET_NUM;
+
+	//for (i = 0; i < INIT_FDSET_NUM; i++)
+	//	fsocket_fd_set[i] = 0;
 
         CPU_ZERO(&cmask);
 
@@ -69,9 +76,32 @@ void fastsocket_init(void)
 __attribute__((destructor))
 void fastsocket_uninit(void)
 {
+	free(fsocket_fd_set);
 	close(fsocket_channel_fd);
 
 	return;
+}
+
+int fastsocket_expand_fdset(int fd)
+{	
+	int *old_fd_set = fsocket_fd_set;
+	int ret = fd;
+	struct fsocket_ioctl_arg arg;
+
+	if (fd >= fsocket_fd_num) {
+		fsocket_fd_set = calloc(fsocket_fd_num + INIT_FDSET_NUM, sizeof(int));
+		if (!fsocket_fd_set) {
+			FSOCKET_DBG(FSOCKET_ERR, "Re allocate memory for listen fd set failed\n");
+			arg.fd = fd;
+			ioctl(fsocket_channel_fd, FSOCKET_IOC_CLOSE, &arg);
+			errno = EMFILE;
+			ret = -1;
+		} else {
+			memcpy(fsocket_fd_set, old_fd_set, fsocket_fd_num * sizeof(int));
+			fsocket_fd_num += INIT_FDSET_NUM;
+		}
+	}
+	return ret;
 }
 
 int socket(int family, int type, int protocol)
@@ -86,9 +116,10 @@ int socket(int family, int type, int protocol)
 		arg.op.socket_op.protocol = protocol;
 
 		fd = ioctl(fsocket_channel_fd, FSOCKET_IOC_SOCKET, &arg);
-		if (fd < 0) {
+		if (fd < 0)
 			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:create light socket failed!\n");
-		}
+		else
+			fd = fastsocket_expand_fdset(fd);
 	} else {
 		if (!real_socket)
 			real_socket = dlsym(RTLD_NEXT, "socket");
@@ -113,14 +144,14 @@ int listen(int fd, int backlog)
 		arg.fd = fd;
 		arg.backlog = backlog;
 
-		if (!fsocket_listen_fds[fd])
-			fsocket_listen_fds[fd] = 1;
+		if (!fsocket_fd_set[fd])
+			fsocket_fd_set[fd] = 1;
 
 		//ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_LISTEN, &arg);
 		ret =  real_listen(fd, backlog);
 		if (ret < 0) {
 			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Listen failed!\n");
-			fsocket_listen_fds[fd] = 0;
+			fsocket_fd_set[fd] = 0;
 		}
 
 	} else {
@@ -161,8 +192,11 @@ int accept(int fd, struct sockaddr *addr, socklen_t *addr_len)
 		arg.op.accept_op.flags = 0;
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_ACCEPT, &arg);
-		if (ret < 0 && errno != EAGAIN) {
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Accept failed!\n");
+		if (ret < 0) {
+			if (errno != EAGAIN)
+				FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Accept failed!\n");
+		} else {
+			ret = fastsocket_expand_fdset(ret);
 		}
 	} else {
 		if (!real_accept)
@@ -208,8 +242,8 @@ int close(int fd)
 	if (fsocket_channel_fd != 0) {
 		arg.fd = fd;
 
-		if (fsocket_listen_fds[fd])
-			fsocket_listen_fds[fd] = 0;
+		if (fsocket_fd_set[fd])
+			fsocket_fd_set[fd] = 0;
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_CLOSE, &arg);
 		if (ret < 0) {
@@ -281,7 +315,7 @@ int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
 		arg.fd = fd;
 		arg.op.spawn_op.cpu = -1;
 
-		if (fsocket_listen_fds[fd] && cmd == EPOLL_CTL_ADD) {
+		if (fsocket_fd_set[fd] && cmd == EPOLL_CTL_ADD) {
 			ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
 			if (ret < 0) {
 				FSOCKET_DBG(FSOCKET_ERR, "FSOCKET: spawn failed!\n");
