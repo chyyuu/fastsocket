@@ -25,7 +25,6 @@ do {\
 
 //TODO: Need Lock for Multi-thread programme
 
-//static int fsocket_fd_set[INIT_FDSET_NUM];
 static int *fsocket_fd_set;
 static int fsocket_fd_num;
 
@@ -147,8 +146,8 @@ int listen(int fd, int backlog)
 		if (!fsocket_fd_set[fd])
 			fsocket_fd_set[fd] = 1;
 
-		//ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_LISTEN, &arg);
-		ret =  real_listen(fd, backlog);
+		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_LISTEN, &arg);
+		//ret =  real_listen(fd, backlog);
 		if (ret < 0) {
 			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Listen failed!\n");
 			fsocket_fd_set[fd] = 0;

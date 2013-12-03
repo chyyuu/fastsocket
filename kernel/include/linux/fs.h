@@ -86,11 +86,6 @@ struct inodes_stat_t {
 /* File is opened using open(.., 3, ..) and is writeable only for ioctls
    (specialy hack for floppy.c) */
 #define FMODE_WRITE_IOCTL	((__force fmode_t)256)
-//XIAOFENG6
-/* File is opened for fastsocket */
-#define FMODE_FASTSOCKET	((__force fmode_t)512)
-//XIAOFENG6
-
 /*
  * Don't update ctime and mtime.
  *
@@ -101,6 +96,15 @@ struct inodes_stat_t {
 
 /* Expect random access pattern */
 #define FMODE_RANDOM		((__force fmode_t)4096)
+//XIAOFENG6
+/* File for fastsocket */
+#define FMODE_FASTSOCKET	((__force fmode_t)8192)
+/* Wake up the first task in wait queue, used with fastsocket*/
+#define FMODE_SINGLE_WAKEUP	((__force fmode_t)16384)
+/* Bind epoll item with file, used with fastsocket */
+#define FMODE_BIND_EPI		((__force fmode_t)32768)
+//XIAOFENG6
+
 
 /*
  * The below are the various read and write types that we support. Some of
@@ -992,7 +996,7 @@ struct file {
 	//XIAOFENG6
 	struct file 		*sub_file;         
 	struct file 		*old_file;         
-	struct epitem		*epoll_item;
+	struct epitem		*f_epi;
 	//XIAOFENG6
 	struct path		f_path;
 #define f_dentry	f_path.dentry

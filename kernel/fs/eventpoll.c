@@ -235,12 +235,6 @@ struct ep_send_events_data {
 #endif
 //XIAOFENG6
 
-//XIAOFENG6
-int enable_fastsocket_epoll = 0;
-EXPORT_SYMBOL(enable_fastsocket_epoll);
-//XIAOFENG6
-
-
 /*
  * Configuration options available inside /proc/sys/fs/epoll/
  */
@@ -582,7 +576,9 @@ int ep_remove(struct eventpoll *ep, struct epitem *epi)
 	struct file *file = epi->ffd.file;
 
 	//XIAOFENG6
-	file->epoll_item = NULL;
+	if (file->f_mode & FMODE_BIND_EPI) {
+		file->f_epi = NULL;
+	}
 	//XIAOFENG6
 
 	/*
@@ -922,8 +918,9 @@ void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 		pwq->whead = whead;
 		pwq->base = epi;
 		//XIAOFENG6
-		if ((file->f_mode & FMODE_FASTSOCKET) && enable_fastsocket_epoll)
+		if (file->f_mode & FMODE_SINGLE_WAKEUP) {
 			pwq->wait.flags |= WQ_FLAG_LOADBALANCE;
+		}
 		//XIAOFENG6
 		add_wait_queue(whead, &pwq->wait);
 		list_add_tail(&pwq->llink, &epi->pwqlist);
@@ -985,8 +982,9 @@ int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	epi->next = EP_UNACTIVE_PTR;
 
 	//XIAOFENG6
-	if ((tfile->f_mode & FMODE_FASTSOCKET) && enable_fastsocket_epoll)
-		tfile->epoll_item = epi;
+	if (tfile->f_mode & FMODE_BIND_EPI) {
+		tfile->f_epi = epi;
+	}
 	//XIAOFENG6
 
 	/* Initialize the poll table using the queue callback */
@@ -1372,10 +1370,6 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	struct epitem *epi;
 	struct epoll_event epds;
 
-	//XIAOFENG6
-	struct socket *sock;
-	//XIAOFENG6
-
 	error = -EFAULT;
 	if (ep_op_has_event(op) &&
 	    copy_from_user(&epds, event, sizeof(struct epoll_event)))
@@ -1440,10 +1434,8 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	 */
 
 	//XIAOFENG6
-	sock = (struct socket *)tfile->private_data;
-	if (tfile->f_mode & FMODE_FASTSOCKET && enable_fastsocket_epoll && 
-			sock->sk->sk_state != TCP_LISTEN)
-		epi = tfile->epoll_item;
+	if (tfile->f_mode & FMODE_BIND_EPI)
+		epi = tfile->f_epi;
 	else
 		epi = ep_find(ep, tfile, fd);
 	//XIAOFENG6

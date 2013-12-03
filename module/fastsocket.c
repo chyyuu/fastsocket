@@ -37,7 +37,7 @@ MODULE_DESCRIPTION("Fast socket kernel module");
 static int fsocket_debug_level = 3;
 static int enable_listen_spawn = 0;
 extern int enable_receive_flow_deliver;
-extern int enable_fastsocket_epoll;
+static int enable_fastsocket_epoll = 0;
 
 module_param(fsocket_debug_level,int, 0);
 module_param(enable_listen_spawn, int, 0);
@@ -556,6 +556,8 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 	file->f_path = path;
 	file->f_mapping = path.dentry->d_inode->i_mapping;
 	file->f_mode = FMODE_READ | FMODE_WRITE | FMODE_FASTSOCKET;
+	if (enable_fastsocket_epoll)
+		file->f_mode |= FMODE_BIND_EPI;
 	file->f_op = &socket_file_ops;
 
 	sock->file = file;
@@ -566,7 +568,7 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 
 	//Extra Initilization For Fastsocket
 	file->sub_file = NULL;
-	file->epoll_item = NULL;
+	file->f_epi = NULL;
 
 	*f = file;
 
@@ -676,15 +678,25 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 
 	sfile->f_path = path;
 	sfile->f_mapping = NULL;
+	
+	//sfile->f_mode = FMODE_READ | FMODE_WRITE | FMODE_FASTSOCKET;
+	//sfile->f_op = &socket_file_ops;
+	//sfile->f_flags = O_RDWR | O_NONBLOCK;
+	//sfile->f_pos = 0;
+	sfile->f_mode = ofile->f_mode;
+	/* For spawned listen socket, set bind-epi and reset single-wakeup */
+	if (enable_fastsocket_epoll) {
+		sfile->f_mode &= ~FMODE_SINGLE_WAKEUP;
+		sfile->f_mode |= FMODE_BIND_EPI;
+	}
+	sfile->f_op = ofile->f_op;
+	sfile->f_flags = ofile->f_flags;
+	sfile->f_pos = ofile->f_pos;
 
-	sfile->f_mode = FMODE_READ | FMODE_WRITE | FMODE_FASTSOCKET;
-	sfile->f_op = &socket_file_ops;
-	sfile->f_flags = O_RDWR | O_NONBLOCK;
-	sfile->f_pos = 0;
 	sfile->private_data = sock;
 
 	sfile->sub_file = NULL;
-	sfile->epoll_item = NULL;
+	sfile->f_epi = NULL;
 
 	//Initialize file at last, so release_sock can release socket inode.
 	sock->file = sfile;
@@ -717,14 +729,18 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	nfile->f_path = path;
 	nfile->f_mapping = path.dentry->d_inode->i_mapping;
 
-	nfile->f_mode = ofile->f_mode;
-	nfile->f_op = ofile->f_op;
-	nfile->f_flags = ofile->f_flags;
-	nfile->f_pos = ofile->f_pos;
+	//nfile->f_mode = ofile->f_mode;
+	//nfile->f_op = ofile->f_op;
+	//nfile->f_flags = ofile->f_flags;
+	//nfile->f_pos = ofile->f_pos;
+	nfile->f_mode = sfile->f_mode;
+	nfile->f_op = sfile->f_op;
+	nfile->f_flags = sfile->f_flags;
+	nfile->f_pos = sfile->f_pos;
 	nfile->private_data = oldsock;
 
 	nfile->sub_file = sfile;
-	nfile->epoll_item = NULL;
+	nfile->f_epi = NULL;
 
 	//Add i_count for this socket inode.
 	atomic_inc(&SOCK_INODE(oldsock)->i_count);
@@ -821,7 +837,7 @@ static int fsocket_ep_insert(struct eventpoll *ep, struct epoll_event *event, st
 	epi->next = EP_UNACTIVE_PTR;
 	
 	/* save epitem in file struct -- XIAOFENG6 */
-	tfile->epoll_item = epi;
+	tfile->f_epi = epi;
 
 	/* Initialize the poll table using the queue callback */
 	epq.epi = epi;
@@ -898,7 +914,7 @@ error_unregister:
 	spin_unlock_irqrestore(&ep->lock, flags);
 
 	kmem_cache_free(epi_cache, epi);
-	tfile->epoll_item = NULL;
+	tfile->f_epi = NULL;
 
 	return error;
 }
@@ -911,7 +927,7 @@ static int fsocket_ep_remove(struct eventpoll *ep, struct epitem *epi)
 	DPRINTK(DEBUG, "%s\n", __func__);
 
 	/* Clear stored epoll item -- XIAOFENG6 */
-	file->epoll_item = NULL;
+	file->f_epi = NULL;
 
 	ep_unregister_pollwait(ep, epi);
 
@@ -1006,12 +1022,19 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
   	 */
 
 	//if (unlikely(sock->sk->sk_state == TCP_LISTEN))
-	if (!enable_fastsocket_epoll)
+	//if (!enable_fastsocket_epoll)
+	if (tfile->f_mode & FMODE_BIND_EPI) {
+		DPRINTK(DEBUG, "File 0x%p binds epi\n", tfile);
+		epi = tfile->f_epi;
+	}
+	else {
+		DPRINTK(DEBUG, "File 0x%p binds NO epi\n", tfile);
 		epi = ep_find(ep, tfile, fd);
-	else
-		epi = tfile->epoll_item;
+	}
+
+	DPRINTK(DEBUG, "OP %d EPI 0x%p\n", op, epi);
 	
-	//epi = tfile->epoll_item;
+	//epi = tfile->f_epi;
 
 	sfile = tfile->sub_file;
 
@@ -1020,6 +1043,7 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 		if (!epi) {
 			epds.events |= POLLERR | POLLHUP;
 			//error = fsocket_ep_insert(ep, &epds, tfile, fd);
+			DPRINTK(DEBUG, "Insert common socket %d\n", fd);
 			error = ep_insert(ep, &epds, tfile, fd);
 			if (sfile && !error) {
 				DPRINTK(DEBUG, "Insert spawned listen socket %d\n", fd);
@@ -1030,28 +1054,30 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 			error = -EEXIST;
 		break;
 	case EPOLL_CTL_DEL:
-		if (epi)
+		if (epi) {
 			//error = fsocket_ep_remove(ep, epi);
+			DPRINTK(DEBUG, "Remove common socket %d\n", fd);
 			error = ep_remove(ep, epi);
 			if (sfile && !error) {
 				struct epitem *sepi;
 				error = -ENOENT;
 
 				DPRINTK(DEBUG, "Remove spawned listen socket %d\n", fd);
-				sepi = sfile->epoll_item;
+				sepi = sfile->f_epi;
 				if (sepi)
 					//error = fsocket_ep_remove(ep, sepi);
 					error = ep_remove(ep, sepi);
 				else
 					DPRINTK(ERR, "No sub epoll item for socket %d\n", fd);
 			}
-		else
+		} else
 			error = -ENOENT;
 		break;
 	case EPOLL_CTL_MOD:
 		if (epi) {
 			epds.events |= POLLERR | POLLHUP;
 			//error = fsocket_ep_modify(ep, epi, &epds);
+			DPRINTK(DEBUG, "Modify common socket %d\n", fd);
 			error = ep_modify(ep, epi, &epds);
 			if (sfile && !error) {
 				DPRINTK(DEBUG, "Modify spawned listen socket %d\n", fd);
@@ -1297,12 +1323,12 @@ static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 	struct file *tfile;
 	int fd, tcpu, ret, fput_needed;
 
-	DPRINTK(DEBUG, "Listen spawn listen fd %d\n", fd);
-
 	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
 		DPRINTK(ERR, "copy ioctl parameter from user space to kernel failed\n");
 		return -EFAULT;
 	}
+
+	DPRINTK(DEBUG, "Listen spawn listen fd %d\n", fd);
 	
 	fd = arg.fd;
 	tcpu = arg.op.spawn_op.cpu;
@@ -1503,10 +1529,51 @@ int fastsocket_accept(struct fsocket_ioctl_arg *u_arg)
 	return ret;
 }
 
+static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
+{
+	struct fsocket_ioctl_arg arg;
+	struct file *tfile;
+	int fd, backlog, ret, fput_needed;
+
+	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
+		DPRINTK(ERR, "copy ioctl parameter from user space to kernel failed\n");
+		return -EFAULT;
+	}
+	
+	fd = arg.fd;
+	backlog = arg.backlog;
+
+	tfile = fget_light(fd, &fput_needed);
+	if (tfile == NULL) {
+		DPRINTK(ERR, "fd [%d] file doesn't exist!\n", fd);
+		return -EINVAL;
+	}
+	
+	if (tfile->f_mode & FMODE_FASTSOCKET) {
+		DPRINTK(DEBUG,"Listen fastsocket %d\n", fd);
+		if (enable_fastsocket_epoll) {
+			/* For listen fastsocket, set single-wakeup and reset bind-epi */
+			tfile->f_mode |= FMODE_SINGLE_WAKEUP;
+			tfile->f_mode &= ~FMODE_BIND_EPI;
+		}
+
+	} else {
+		DPRINTK(WARNING, "Listen non-fastsocket %d\n", fd);
+	}
+	
+	ret = sys_listen(fd, backlog);
+
+	fput_light(tfile, fput_needed);
+
+	return ret;
+}
+
 static int fastsocket_socket(struct fsocket_ioctl_arg *u_arg)
 {
 	struct fsocket_ioctl_arg arg; 
 	int family, type, protocol, fd;
+
+	DPRINTK(DEBUG,"Try to create fastsocket\n");
 
 	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
 		DPRINTK(ERR, "copy ioctl parameter from user space to kernel failed\n");
@@ -1568,12 +1635,12 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 	struct eventpoll *ep;
 	int e_fput_need, t_fput_need, ret;
 
-	DPRINTK(DEBUG, "Epoll_ctl socket %d\n", arg.fd);
-
 	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
 		DPRINTK(ERR, "copy ioctl parameter from user space to kernel failed\n");
 		return -EFAULT;
 	}
+
+	DPRINTK(DEBUG, "Epoll_ctl socket %d[%d]\n", arg.fd, arg.op.epoll_op.ep_ctl_cmd);
 
 	/* Only use module epoll_ctl when listen spawn is enabled,
 	 * fastepoll is taken care of by kernel source.
@@ -1620,6 +1687,8 @@ static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long 
 	switch (cmd) {
 	case FSOCKET_IOC_SOCKET:
 		return fastsocket_socket((struct fsocket_ioctl_arg *) arg);
+	case FSOCKET_IOC_LISTEN:
+		return fastsocket_listen((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_SPAWN:
 		return fastsocket_spawn((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_ACCEPT:
