@@ -66,3 +66,4 @@ obj-$(CONFIG_SYSCTL)		+= sysctl_net.o
 endif
 obj-$(CONFIG_WIMAX)		+= wimax/
 obj-$(CONFIG_TOA)		+= toa/
+obj-$(CONFIG_FASTSOCKET)	+= fastsocket/

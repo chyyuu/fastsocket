@@ -24,34 +24,34 @@
 #include <linux/types.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
-
 #include <linux/fsnotify.h>
 
 #include "fastsocket.h"
 
+
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Xiaofeng Lin <sina.com>, SiXing Xiao <sina.com>");
+MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
 
-MODULE_DESCRIPTION("Fast socket kernel module");
+MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
-static int fsocket_debug_level = 3;
+static int enable_fastsocket_debug = 3;
 static int enable_listen_spawn = 0;
 extern int enable_receive_flow_deliver;
-static int enable_fastsocket_epoll = 0;
+static int enable_fast_epoll = 0;
 
-module_param(fsocket_debug_level,int, 0);
+module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);
 module_param(enable_receive_flow_deliver, int, 0);
-module_param(enable_fastsocket_epoll, int, 0);
+module_param(enable_fast_epoll, int, 0);
 
-MODULE_PARM_DESC(fsocket_debug_level, " Debug level [0-6]" );
+MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
 MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale[Default], 1 = Process affinity required, 2 = Autoset process affinity ");
 MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled ");
-MODULE_PARM_DESC(enable_fastsocket_epoll, " Control Fastsocket-Epoll: 0 = Disbale[Default], 1 = Enabled ");
+MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disbale[Default], 1 = Enabled ");
 
-int fsocket_get_dbg_level(void)
+int inline fsocket_get_dbg_level(void)
 {
-	return fsocket_debug_level;
+	return enable_fastsocket_debug;
 }
 
 #define DISABLE_LISTEN_SPAWN			0
@@ -556,7 +556,7 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 	file->f_path = path;
 	file->f_mapping = path.dentry->d_inode->i_mapping;
 	file->f_mode = FMODE_READ | FMODE_WRITE | FMODE_FASTSOCKET;
-	if (enable_fastsocket_epoll)
+	if (enable_fast_epoll)
 		file->f_mode |= FMODE_BIND_EPI;
 	file->f_op = &socket_file_ops;
 
@@ -685,7 +685,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	//sfile->f_pos = 0;
 	sfile->f_mode = ofile->f_mode;
 	/* For spawned listen socket, set bind-epi and reset single-wakeup */
-	if (enable_fastsocket_epoll) {
+	if (enable_fast_epoll) {
 		sfile->f_mode &= ~FMODE_SINGLE_WAKEUP;
 		sfile->f_mode |= FMODE_BIND_EPI;
 	}
@@ -1022,7 +1022,7 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
   	 */
 
 	//if (unlikely(sock->sk->sk_state == TCP_LISTEN))
-	//if (!enable_fastsocket_epoll)
+	//if (!enable_fast_epoll)
 	if (tfile->f_mode & FMODE_BIND_EPI) {
 		DPRINTK(DEBUG, "File 0x%p binds epi\n", tfile);
 		epi = tfile->f_epi;
@@ -1551,7 +1551,7 @@ static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
 	
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
 		DPRINTK(DEBUG,"Listen fastsocket %d\n", fd);
-		if (enable_fastsocket_epoll) {
+		if (enable_fast_epoll) {
 			/* For listen fastsocket, set single-wakeup and reset bind-epi */
 			tfile->f_mode |= FMODE_SINGLE_WAKEUP;
 			tfile->f_mode &= ~FMODE_BIND_EPI;
