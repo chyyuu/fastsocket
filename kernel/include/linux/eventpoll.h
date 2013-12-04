@@ -17,7 +17,6 @@
 /* For O_CLOEXEC */
 #include <linux/fcntl.h>
 #include <linux/types.h>
-#include <linux/poll.h>
 
 /* Flags for epoll_create1.  */
 #define EPOLL_CLOEXEC O_CLOEXEC
@@ -58,46 +57,9 @@ struct file;
 
 #ifdef CONFIG_EPOLL
 
-//XIAOFENG6
-
-/* Epoll private bits inside the event mask */
-#define EP_PRIVATE_BITS (EPOLLONESHOT | EPOLLET)
-
-/* Maximum number of nesting allowed inside epoll sets */
-#define EP_MAX_NESTS 4
-
-/* Maximum msec timeout value storeable in a long int */
-#define EP_MAX_MSTIMEO min(1000ULL * MAX_SCHEDULE_TIMEOUT / HZ, (LONG_MAX - 999ULL) / HZ)
-
-#define EP_MAX_EVENTS (INT_MAX / sizeof(struct epoll_event))
-
-#define EP_UNACTIVE_PTR ((void *) -1L)
-
-#define EP_ITEM_COST (sizeof(struct epitem) + sizeof(struct eppoll_entry))
-
-
 struct epoll_filefd {
 	struct file *file;
 	int fd;
-};
-
-/*
- * Structure used to track possible nested calls, for too deep recursions
- * and loop cycles.
- */
-struct nested_call_node {
-	struct list_head llink;
-	void *cookie;
-	void *ctx;
-};
-
-/*
- * This structure is used as collector for nested calls, to check for
- * maximum recursion dept and loop cycles.
- */
-struct nested_calls {
-	struct list_head tasks_call_list;
-	spinlock_t lock;
 };
 
 /*
@@ -176,96 +138,11 @@ struct eventpoll {
 	struct user_struct *user;
 };
 
-/* Wait structure used by the poll hooks */
-struct eppoll_entry {
-	/* List header used to link this structure to the "struct epitem" */
-	struct list_head llink;
-
-	/* The "base" pointer is set to the container "struct epitem" */
-	struct epitem *base;
-
-	/*
-	 * Wait queue item that will be linked to the target file wait
-	 * queue head.
-	 */
-	wait_queue_t wait;
-
-	/* The wait queue head that linked the "wait" wait queue item */
-	wait_queue_head_t *whead;
-};
-
-/* Wrapper struct used by poll queueing */
-struct ep_pqueue {
-	poll_table pt;
-	struct epitem *epi;
-};
-
-/* Used by the ep_send_events() function as callback private data */
-struct ep_send_events_data {
-	int maxevents;
-	struct epoll_event __user *events;
-};
-
-/* Setup the structure that is used as key for the RB tree */
-static inline void ep_set_ffd(struct epoll_filefd *ffd,
-			      struct file *file, int fd)
-{
-	ffd->file = file;
-	ffd->fd = fd;
-}
-
-/* Compare RB tree keys */
-static inline int ep_cmp_ffd(struct epoll_filefd *p1,
-			     struct epoll_filefd *p2)
-{
-	return (p1->file > p2->file ? +1:
-	        (p1->file < p2->file ? -1 : p1->fd - p2->fd));
-}
-
-/* Tells us if the item is currently linked */
-static inline int ep_is_linked(struct list_head *p)
-{
-	return !list_empty(p);
-}
-
-/* Get the "struct epitem" from a wait queue pointer */
-static inline struct epitem *ep_item_from_wait(wait_queue_t *p)
-{
-	return container_of(p, struct eppoll_entry, wait)->base;
-}
-
-/* Get the "struct epitem" from an epoll queue wrapper */
-static inline struct epitem *ep_item_from_epqueue(poll_table *p)
-{
-	return container_of(p, struct ep_pqueue, pt)->epi;
-}
-
-/* Tells if the epoll_ctl(2) operation needs an event copy from userspace */
-static inline int ep_op_has_event(int op)
-{
-	return op != EPOLL_CTL_DEL;
-}
-
 //XIAOFENG6
-
 extern int ep_remove(struct eventpoll *ep, struct epitem *epi);
-extern int ep_insert(struct eventpoll *ep, struct epoll_event *event, 
-		struct file *tfile, int fd);
-extern int ep_modify(struct eventpoll *ep, struct epitem *epi, 
-		struct epoll_event *event);
-extern void ep_poll_safewake(wait_queue_head_t *wq);
-extern int ep_alloc(struct eventpoll **pep);
-extern void ep_free(struct eventpoll *ep);
-extern void ep_rbtree_insert(struct eventpoll *ep, struct epitem *epi);
-extern void ep_unregister_pollwait(struct eventpoll *ep, struct epitem *epi);
-extern void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead, 
-	poll_table *pt);
-extern int ep_poll(struct eventpoll *ep, 
-	struct epoll_event __user *events, int maxevents, long timeout);
+extern int ep_insert(struct eventpoll *ep, struct epoll_event *event, struct file *tfile, int fd);
+extern int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event);
 extern struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd);
-extern int max_user_watches;
-extern struct kmem_cache *epi_cache;
-
 //XIAOFENG6
 
 /* Used to initialize the epoll bits inside the "struct file" */
