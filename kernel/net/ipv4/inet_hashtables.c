@@ -29,10 +29,8 @@
 //#define DPRINTK(klevel, fmt, args...) printk(KERN_##klevel "[Hydra Channel]" " [CPU%d] %s:%d\t" fmt, smp_processor_id(), __FUNCTION__ , __LINE__, ## args)
 #define DPRINTK(klevel, fmt, args...)
 
-//XIAOFENG6
 DEFINE_PER_CPU(struct inet_hash_stats, hash_stats);
 EXPORT_PER_CPU_SYMBOL(hash_stats);
-//XIAOFENG6
 
 /*
  * Allocate and initialize a new local port bind bucket.
@@ -160,10 +158,7 @@ static inline int compute_score(struct sock *sk, struct net *net,
 {
 	int score = -1;
 	struct inet_sock *inet = inet_sk(sk);
-
-	//XIAOFENG6
 	int processor_id = smp_processor_id();
-	//XIAOFENG6
 
 	if (net_eq(sock_net(sk), net) && inet->num == hnum &&
 			!ipv6_only_sock(sk)) {
@@ -180,14 +175,11 @@ static inline int compute_score(struct sock *sk, struct net *net,
 			score += 2;
 		}
 
-		//XIAOFENG6
-		if (sk->cpumask == 0)
+		if (sk->sk_cpumask == 0)
 			score++;
 
-		//FIXME: Each Socket should bound to one single CPU
-		if (sk->cpumask & ((unsigned long)1 << processor_id))
+		if (sk->sk_cpumask & ((unsigned long)1 << processor_id))
 			score += 2;
-		//XIAOFENG6
 	}
 	return score;
 }
@@ -197,18 +189,16 @@ static struct sock * __inet_lookup_local_listener(struct net *net,
 					   const __be32 daddr, const unsigned short hum,
 					   const int dif)
 {
-	int score = 0, hiscore = 0;
 	struct sock *sk, *result;
 	struct hlist_nulls_node *node;
 	unsigned int hash = inet_lhashfn_ex(net, daddr, hum);
-	struct inet_listen_hash_chunk *lis_chunk = per_cpu_ptr(hashinfo->local_listening_hash, smp_processor_id());
-	struct inet_listen_hashbucket *ilb = &lis_chunk->listening_hash[hash];
-	
-	result = NULL;
-	hiscore = -1;
+	struct inet_listen_hashtable *ilt = per_cpu_ptr(hashinfo->local_listening_hash, smp_processor_id());
+	struct inet_listen_hashbucket *ilb = &ilt->listening_hash[hash];
+	int score, hiscore;
 
 begin:	
-	//sk_nulls_for_each_rcu(sk, node, &ilb->head) {
+	result = NULL;
+	hiscore = -1;
 	sk_nulls_for_each(sk, node, &ilb->head) {
 		score = compute_score(sk, net, hum, daddr, dif);
 		if (score > hiscore) {
@@ -216,7 +206,6 @@ begin:
 			hiscore = score;
 		}
 	}
-
 	/*
 	 * if the nulls value we got at the end of this lookup is
 	 * not the expected one, we must restart lookup.
@@ -234,12 +223,10 @@ begin:
 		}
 	} else {
 		hash = inet_lhashfn_ex(net, 0, hum);
-		ilb = &lis_chunk->listening_hash[hash];
+		ilb = &ilt->listening_hash[hash];
 begin1:
 		result = NULL;
 		hiscore = -1;
-		
-		//sk_nulls_for_each_rcu(sk, node, &ilb->head) {
 		sk_nulls_for_each(sk, node, &ilb->head) {
 			score = compute_score(sk, net, hum, daddr, dif);
 			if (score > hiscore) {
@@ -261,10 +248,8 @@ begin1:
 		}
 	}
 
-	//XIAOFENG6
 	if (result)
 		__get_cpu_var(hash_stats).local_listen_lookup++;
-	//XIAOFENG6
 
 	return result;
 }
@@ -289,7 +274,6 @@ struct sock *__inet_lookup_listener(struct net *net,
 	struct inet_listen_hashbucket *ilb = &hashinfo->listening_hash[hash];
 	int score, hiscore;
 
-	
 	result = __inet_lookup_local_listener(net, hashinfo, daddr, hnum, dif);
 	if (result) {
 		return result;
@@ -313,6 +297,7 @@ begin:
 	 */
 	if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
 		goto begin;
+
 	if (result) {
 		if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
 			result = NULL;
@@ -322,13 +307,11 @@ begin:
 			goto begin;
 		}
 	} else {
-		
 		hash = inet_lhashfn_ex(net, 0, hnum);
 		ilb = &hashinfo->listening_hash[hash];
 begin1:
 		result = NULL;
 		hiscore = -1;
-		
 		sk_nulls_for_each_rcu(sk, node, &ilb->head) {
 			score = compute_score(sk, net, hnum, daddr, dif);
 			if (score > hiscore) {
@@ -351,10 +334,9 @@ begin1:
 	}
 	rcu_read_unlock();
 
-	//XIAOFENG6
 	if (result)
 		__get_cpu_var(hash_stats).global_listen_lookup++;
-	//XIAOFENG6
+
 	return result;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_listener);
@@ -534,16 +516,18 @@ static void __inet_hash(struct sock *sk)
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
 	struct inet_listen_hashbucket *ilb;
-	int hash = 0;
+	int hash;
 
 	if (sk->sk_state != TCP_LISTEN) {
 		__inet_hash_nolisten(sk);
 		return;
 	}
 
+	WARN_ON(!sk_unhashed(sk));
+
 	hash = inet_sk_listen_hashfn(sk);
-	if (sk->cpumask == 0) {
-		WARN_ON(!sk_unhashed(sk));
+
+	if (!sk->sk_cpumask) {
 		ilb = &hashinfo->listening_hash[hash];
 
 		spin_lock(&ilb->lock);
@@ -551,33 +535,25 @@ static void __inet_hash(struct sock *sk)
 		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 		spin_unlock(&ilb->lock);
 
-		//XIAOFENG6
 		__get_cpu_var(hash_stats).global_listen_hash++;
-		//XIAOFENG6
 	} else {
-		/*
- 		 *  add to local listening hashtable 
-  		 */
-		struct inet_listen_hash_chunk *lis_hash_chk = NULL;
-		int cpuid = 0, i = 0;
+		struct inet_listen_hashtable *ilt;
+		int cpu;
 
-		for_each_possible_cpu(i) {
-			if (sk->cpumask & ((unsigned long)1 << i))
+		for_each_possible_cpu(cpu) {
+			if (sk->sk_cpumask & ((unsigned long)1 << cpu))
 				break;
 		}
-		cpuid = i;
 		
-		lis_hash_chk = per_cpu_ptr(hashinfo->local_listening_hash, cpuid);	
-		ilb = &lis_hash_chk->listening_hash[hash];
+		ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);	
+		ilb = &ilt->listening_hash[hash];
 		
 		spin_lock(&ilb->lock);
 		__sk_nulls_add_node_rcu(sk, &ilb->head);
 		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 		spin_unlock(&ilb->lock);
 
-		//XIAOFENG6
 		__get_cpu_var(hash_stats).local_listen_hash++;
-		//XIAOFENG6
 	}
 }
 
@@ -602,30 +578,25 @@ void inet_unhash(struct sock *sk)
 
 	if (sk->sk_state == TCP_LISTEN) {
 		int hash = inet_sk_listen_hashfn(sk);
-		if (sk->cpumask == 0) {
+		if (!sk->sk_cpumask) {
 			lock = &hashinfo->listening_hash[hash].lock;
-			//XIAOFENG6
-			__get_cpu_var(hash_stats).global_listen_unhash++;
-			//XIAOFENG6
-		} else {
-			struct inet_listen_hashbucket *ilh = NULL;
-			struct inet_listen_hash_chunk *lis_hash_chk;
-			int cpuid = 0, i = 0;
 
-			for_each_possible_cpu(i) {
-				if (sk->cpumask & ((unsigned long)1 << i))
+			__get_cpu_var(hash_stats).global_listen_unhash++;
+		} else {
+			struct inet_listen_hashbucket *ilb;
+			struct inet_listen_hashtable *ilt;
+			int cpu;
+
+			for_each_possible_cpu(cpu) {
+				if (sk->sk_cpumask & ((unsigned long)1 << cpu))
 					break;
 			}
-			cpuid = i;
-				
-			//printk(KERN_INFO"inet_unhash:cpuid=%d\n", cpuid);
-			lis_hash_chk = per_cpu_ptr(hashinfo->local_listening_hash, cpuid);
-			
-			ilh = &lis_hash_chk->listening_hash[hash];
-			lock = &ilh->lock;
-			//XIAOFENG6
+			ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);
+			ilb = &ilt->listening_hash[hash];
+
+			lock = &ilb->lock;
+
 			__get_cpu_var(hash_stats).local_listen_unhash++;
-			//XIAOFENG6
 		}
 	}
 	else
@@ -659,20 +630,12 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 		struct hlist_node *node;
 		struct inet_timewait_sock *tw = NULL;
 
-		DPRINTK(INFO, "Hint: %u - base offset: %u - new offset: %u\n", 
-			hint, port_offset, offset);
-
 		inet_get_local_port_range(&low, &high);
 		remaining = (high - low) + 1;
-
-		DPRINTK(INFO, "Port pool:%d [%d - %d]\n", remaining, low, high);
 
 		local_bh_disable();
 		for (i = 1; i <= remaining; i++) {
 			port = low + (i + offset) % remaining;
-
-			DPRINTK(INFO, "Target port %d\n", port);
-
 			if (inet_is_reserved_local_port(port))
 				continue;
 			head = &hinfo->bhash[inet_bhashfn(net, port,
@@ -714,8 +677,6 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 ok:
 		hint += i;
 
-		DPRINTK(INFO, "Port selected:%u - hint updated: %u\n", port, hint);
-
 		/* Head lock still held and bh's disabled */
 		inet_bind_hash(sk, tb, port);
 		if (sk_unhashed(sk)) {
@@ -751,7 +712,7 @@ out:
 }
 
 
-int fastsocket_inet_hash_connect(struct inet_timewait_death_row *death_row,
+int rfd_inet_hash_connect(struct inet_timewait_death_row *death_row,
 		struct sock *sk, u32 port_offset,
 		int (*check_established)(struct inet_timewait_death_row *,
 			struct sock *, __u16, struct inet_timewait_sock **),
@@ -764,59 +725,40 @@ int fastsocket_inet_hash_connect(struct inet_timewait_death_row *death_row,
 	int ret;
 	struct net *net = sock_net(sk);
 
-	//XIAOFENG6
-	int cpu = smp_processor_id();
-	//FIXME: CPU hot plug 
-	int cpu_num = num_active_cpus();
-	int round_cpu_num;
-
+	int cpu = smp_processor_id(), cpu_num = num_active_cpus(), round_cpu_num;
 	unsigned int mask;
 		
 	round_cpu_num = cpu_num;
 
 	if (!is_power_of_2(cpu_num))
 		round_cpu_num = roundup_pow_of_two(cpu_num);
-
 	mask = ~(round_cpu_num - 1);
 
 	DPRINTK(INFO, "Total cpu num: %d - Round cpu num: %d - cpu mask : %x - Current cpu: %d\n", cpu_num, round_cpu_num, mask, cpu);
 
-	//XIAOFENG6
-
 	if (!snum) {
 		int i, remaining, low, high, port;
 		static u32 hint;
-		//XIAOFENG6
-		//u32 offset = hint + port_offset;
 		u32 offset = hint + (port_offset & mask);
-		//XIAOFENG6
 		struct hlist_node *node;
 		struct inet_timewait_sock *tw = NULL;
 
-		//XIAOFENG6
 		DPRINTK(INFO, "Hint: %u - base offset: %u - new offset: %u\n", 
 			hint, port_offset, offset);
 
 		inet_get_local_port_range(&low, &high);
-
 		low &= mask;
 		high &= mask;
-
-		//remaining = (high - low) + 1;
 		remaining = high - low;
-		//XIAOFENG6
 
 		DPRINTK(INFO, "Port pool:%d [%d - %d]\n", remaining, low, high);
 
 		local_bh_disable();
-		//XIAOFENG6
-		//for (i = 1; i <= remaining; i++) {
 		for (i = 0; i <= remaining; i = i + round_cpu_num) {
-			//port = low + (i + offset) % remaining;
 			port = low + (i + offset + cpu) % remaining;
 			
 			DPRINTK(INFO, "Target port %d\n", port);
-		//XIAOFENG6
+
 			if (inet_is_reserved_local_port(port))
 				continue;
 			head = &hinfo->bhash[inet_bhashfn(net, port,
@@ -856,11 +798,9 @@ int fastsocket_inet_hash_connect(struct inet_timewait_death_row *death_row,
 		return -EADDRNOTAVAIL;
 
 ok:
-		//XIAOFENG6
-		//hint += i;
 		hint += (i + 1) * round_cpu_num;
+
 		DPRINTK(INFO, "Port selected:%u - hint updated: %u\n", port, hint);
-		//XIAOFENG6
 
 		/* Head lock still held and bh's disabled */
 		inet_bind_hash(sk, tb, port);
@@ -900,29 +840,23 @@ out:
  * Bind a port for a connect operation and hash it.
  */
 
-//XIAOFENG6
 extern int enable_receive_flow_deliver;
-//XIAOFENG6
 
 int inet_hash_connect(struct inet_timewait_death_row *death_row,
 		      struct sock *sk)
 {
-	//XIAOFENG6
 	int ret; 
 	if (enable_receive_flow_deliver)
-		ret = fastsocket_inet_hash_connect(death_row, sk, inet_sk_port_offset(sk),
+		ret = rfd_inet_hash_connect(death_row, sk, inet_sk_port_offset(sk),
 				__inet_check_established, __inet_hash_nolisten);
 	else
 		ret = __inet_hash_connect(death_row, sk, inet_sk_port_offset(sk), 
 				__inet_check_established, __inet_hash_nolisten);
 
 	return ret;
-	//XIAOFENG6
 }
 
 EXPORT_SYMBOL_GPL(inet_hash_connect);
-
-//XIAOFENG6
 
 static volatile unsigned cpu_id;
 
@@ -1035,29 +969,25 @@ static int inet_hash_proc_init(void)
 	return register_pernet_subsys(&inet_hash_proc_ops);
 }
 
-//XIAOFENG6
-
 void inet_hashinfo_init(struct inet_hashinfo *h)
 {
 	int i;
 
-	//XIAOFENG6
 	inet_hash_proc_init();
-	//XIAOFENG6
 
 	atomic_set(&h->bsockets, 0);
-	h->local_listening_hash = alloc_percpu(struct inet_listen_hash_chunk);
+	h->local_listening_hash = alloc_percpu(struct inet_listen_hashtable);
 
 	/*
  	 * Initialise local listening hash 
  	 */
 	for_each_possible_cpu(i) {
-		struct inet_listen_hash_chunk *chk = per_cpu_ptr(h->local_listening_hash, i);
-		
-		int k = 0;
+		struct inet_listen_hashtable *ilt = per_cpu_ptr(h->local_listening_hash, i);
+		int k;
+
 		for (k = 0; k < INET_LHTABLE_SIZE; k++) {
-			spin_lock_init(&chk->listening_hash[k].lock);
-			INIT_HLIST_NULLS_HEAD(&chk->listening_hash[k].head,
+			spin_lock_init(&ilt->listening_hash[k].lock);
+			INIT_HLIST_NULLS_HEAD(&ilt->listening_hash[k].head,
 					      k + LISTENING_NULLS_BASE);
 		}
 	}

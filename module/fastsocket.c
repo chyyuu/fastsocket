@@ -655,7 +655,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		goto out;
 	}
 
-	sock->sk->cpumask = 0;
+	sock->sk->sk_cpumask = 0;
 
 	fsocket_copy_socket(oldsock, sock);
 
@@ -1130,7 +1130,7 @@ static int fsocket_process_affinity_check(void)
 	ccpu = cpumask_first(&omask);
 	ncpu = cpumask_next(ccpu, &omask);
 
-	if (ccpu > (sizeof(sock->sk->cpumask) << 3))
+	if (ccpu > (sizeof(sock->sk->sk_cpumask) << 3))
 	{
 		DPRINTK(ERR, "CPU number exceeds size of cpumask\n");
 		return -EINVAL;
@@ -1179,14 +1179,14 @@ static int fsocket_process_affinity_check(void)
 
 static void fsocket_sk_affinity_set(struct socket *sock, int cpu)
 {
-	sock->sk->cpumask = (unsigned long)1 << cpu;
+	sock->sk->sk_cpumask = (unsigned long)1 << cpu;
 
-	DPRINTK(DEBUG, "Bind this listen socket to CPU %d with bitmap 0x%02lx\n", cpu, sock->sk->cpumask);
+	DPRINTK(DEBUG, "Bind this listen socket to CPU %d with bitmap 0x%02lx\n", cpu, sock->sk->sk_cpumask);
 }
 
 static void fsocket_sk_affinity_release(struct socket *sock)
 {
-	sock->sk->cpumask = 0;
+	sock->sk->sk_cpumask = 0;
 }
 
 static void fsocket_filp_close_spawn(int fd)

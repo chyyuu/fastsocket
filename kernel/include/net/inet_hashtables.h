@@ -37,6 +37,26 @@
 #include <asm/atomic.h>
 #include <asm/byteorder.h>
 
+struct inet_hash_stats
+{
+	unsigned long	common_accept;
+	unsigned long	local_accept;
+	unsigned long	global_accept;
+	
+	unsigned long	common_accept_failed;
+	unsigned long	local_accept_failed;
+	unsigned long	global_accept_failed;
+
+	unsigned long	local_listen_lookup;
+	unsigned long 	global_listen_lookup;
+
+	unsigned 	local_listen_hash;
+	unsigned	local_listen_unhash;
+
+	unsigned 	global_listen_hash;
+	unsigned	global_listen_unhash;
+};
+
 /* This is for all connections with a full identity, no wildcards.
  * One chain is dedicated to TIME_WAIT sockets.
  * I'll experiment with dynamic table growth later.
@@ -99,9 +119,7 @@ static inline struct net *ib_net(struct inet_bind_bucket *ib)
 struct inet_bind_hashbucket {
 	spinlock_t		lock;
 	struct hlist_head	chain;
-//XIAOFENG6
 }____cacheline_aligned_in_smp;
-//XIAOFENG6
 
 /*
  * Sockets can be hashed in established or listening table
@@ -116,34 +134,11 @@ struct inet_listen_hashbucket {
 };
 
 /* This is for listening sockets, thus all sockets which possess wildcards. */
-#define INET_LHTABLE_SIZE	256	/* Yes, really, this is all you need. */
+#define INET_LHTABLE_SIZE	32	/* Yes, really, this is all you need. */
 
-struct inet_listen_hash_chunk {
-	struct inet_listen_hashbucket  listening_hash[INET_LHTABLE_SIZE]
-					____cacheline_aligned_in_smp;
+struct inet_listen_hashtable {
+	struct inet_listen_hashbucket  listening_hash[INET_LHTABLE_SIZE];
 };
-
-//XIAOFENG6
-struct inet_hash_stats
-{
-	unsigned long	common_accept;
-	unsigned long	local_accept;
-	unsigned long	global_accept;
-	
-	unsigned long	common_accept_failed;
-	unsigned long	local_accept_failed;
-	unsigned long	global_accept_failed;
-
-	unsigned long	local_listen_lookup;
-	unsigned long 	global_listen_lookup;
-
-	unsigned 	local_listen_hash;
-	unsigned	local_listen_unhash;
-
-	unsigned 	global_listen_hash;
-	unsigned	global_listen_unhash;
-};
-//XIAOFENG6
 
 struct inet_hashinfo {
 	/* This is for sockets with full identity only.  Sockets here will
@@ -180,7 +175,7 @@ struct inet_hashinfo {
 	 */
 	struct inet_listen_hashbucket	listening_hash[INET_LHTABLE_SIZE]
 					____cacheline_aligned_in_smp;
-	struct inet_listen_hash_chunk  __percpu *local_listening_hash;
+	struct inet_listen_hashtable  __percpu *local_listening_hash;
 	atomic_t			bsockets;
 };
 
@@ -272,8 +267,7 @@ static inline int inet_lhashfn(struct net *net, const unsigned short num)
 static inline int inet_lhashfn_ex(struct net *net, const unsigned int addr, 
 				   const unsigned short num)
 {
-	//return jhash_2words(addr, num, net_hash_mix(net)) & (INET_LHTABLE_SIZE -1);
-	return (addr>>24|num) & (INET_LHTABLE_SIZE -1);
+	return (addr >> 24 | num) & (INET_LHTABLE_SIZE -1);
 }
 
 static inline int inet_sk_listen_hashfn(const struct sock *sk)
