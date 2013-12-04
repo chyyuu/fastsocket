@@ -386,10 +386,6 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 	return ret;
 }
 
-//XIAOFENG6
-EXPORT_SYMBOL(sys_read);
-//XIAOFENG6
-
 SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		size_t, count)
 {
@@ -407,10 +403,6 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 
 	return ret;
 }
-
-//XIAOFENG6
-EXPORT_SYMBOL(sys_write);
-//XIAOFENG6
 
 SYSCALL_DEFINE(pread64)(unsigned int fd, char __user *buf,
 			size_t count, loff_t pos)

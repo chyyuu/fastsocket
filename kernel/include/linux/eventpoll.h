@@ -138,12 +138,10 @@ struct eventpoll {
 	struct user_struct *user;
 };
 
-//XIAOFENG6
 extern int ep_remove(struct eventpoll *ep, struct epitem *epi);
 extern int ep_insert(struct eventpoll *ep, struct epoll_event *event, struct file *tfile, int fd);
 extern int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event);
 extern struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd);
-//XIAOFENG6
 
 /* Used to initialize the epoll bits inside the "struct file" */
 static inline void eventpoll_init_file(struct file *file)

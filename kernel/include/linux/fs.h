@@ -96,14 +96,12 @@ struct inodes_stat_t {
 
 /* Expect random access pattern */
 #define FMODE_RANDOM		((__force fmode_t)4096)
-//XIAOFENG6
 /* File for fastsocket */
 #define FMODE_FASTSOCKET	((__force fmode_t)8192)
-/* Wake up the first task in wait queue, used with fastsocket*/
+/* Wake up the task in a round bobin way, used with fastsocket*/
 #define FMODE_SINGLE_WAKEUP	((__force fmode_t)16384)
 /* Bind epoll item with file, used with fastsocket */
 #define FMODE_BIND_EPI		((__force fmode_t)32768)
-//XIAOFENG6
 
 
 /*
@@ -993,11 +991,9 @@ struct file {
 		struct list_head	fu_list;
 		struct rcu_head 	fu_rcuhead;
 	} f_u;
-	//XIAOFENG6
 	struct file 		*sub_file;         
 	struct file 		*old_file;         
 	struct epitem		*f_epi;
-	//XIAOFENG6
 	struct path		f_path;
 #define f_dentry	f_path.dentry
 #define f_vfsmnt	f_path.mnt
@@ -2252,9 +2248,7 @@ extern void inode_init_once(struct inode *);
 extern void inode_add_to_lists(struct super_block *, struct inode *);
 extern void ihold(struct inode * inode);
 extern void iput(struct inode *);
-//XIAOFENG6
 extern void iput_fastsocket(struct inode *inode);
-//XIAOFENG6
 extern struct inode * igrab(struct inode *);
 extern ino_t iunique(struct super_block *, ino_t);
 extern int inode_needs_sync(struct inode *inode);

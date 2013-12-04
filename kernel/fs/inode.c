@@ -1362,32 +1362,16 @@ void iput(struct inode *inode)
 }
 EXPORT_SYMBOL(iput);
 
-//XIAOFENG6
 void iput_fastsocket(struct inode *inode)
 {
-	if (atomic_dec_and_test(&inode->i_count)) {
-		if (inode->i_sb) {
-			if (inode->i_sb->s_op) {
-				//printk(KERN_DEBUG "Destroy inode 0x%p sb 0x%p ops 0x%p\n", inode, inode->i_sb, inode->i_sb->s_op);
-				if (inode->i_sb->s_op->destroy_inode) {
-					inode->i_sb->s_op->destroy_inode(inode);
-					return;
-				}
-				//else
-				//	printk(KERN_ERR "No destroy method for inode 0x%p\n", inode);
-			}
-		//	else
-		//		printk(KERN_ERR "No super block ops for inode 0x%p\n", inode);
+	if (inode && atomic_dec_and_test(&inode->i_count)) {
+		if (inode->i_sb && inode->i_sb->s_op && inode->i_sb->s_op->destroy_inode) {
+			inode->i_sb->s_op->destroy_inode(inode);
+			return;
 		}
-		//else {
-		//	printk(KERN_ERR "No super block for inode 0x%p\n", inode);
-		//}
-	
-		//printk(KERN_ERR "Put fastsocket inode 0x%p failed\n", inode);
 	}
 }
 EXPORT_SYMBOL(iput_fastsocket);
-//XIAOFENG6
 
 /**
  *	bmap	- find a block number in a file

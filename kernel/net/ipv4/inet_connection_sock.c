@@ -60,13 +60,9 @@ int inet_csk_bind_conflict(const struct sock *sk,
 	struct hlist_node *node;
 	int reuse = sk->sk_reuse;
 
-	//XIAOFENG6
-
 	//FIXME: Is it check enough?
-
 	if (sk->sk_cpumask)
 		return 0;
-	//XIAOFENG6
 
 	/*
 	 * Unlike other sk lookup places we do not check

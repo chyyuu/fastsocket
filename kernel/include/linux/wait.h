@@ -32,9 +32,7 @@ int default_wake_function(wait_queue_t *wait, unsigned mode, int flags, void *ke
 struct __wait_queue {
 	unsigned int flags;
 #define WQ_FLAG_EXCLUSIVE	0x01
-//XIAOFENG6
 #define WQ_FLAG_LOADBALANCE	0x02
-//XIAOFENG6
 	void *private;
 	wait_queue_func_t func;
 	struct list_head task_list;

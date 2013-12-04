@@ -135,14 +135,12 @@
 
 #include "net-sysfs.h"
 
-//XIAOFENG6
 #include <linux/log2.h>
 #include <net/inet_hashtables.h>
 #include <net/tcp.h>
 
 //#define DPRINTK(klevel, fmt, args...) printk(KERN_##klevel "[Hydra Channel]" " [CPU%d] %s:%d\t" fmt, smp_processor_id(), __FUNCTION__ , __LINE__, ## args)
 #define DPRINTK(klevel, fmt, args...) 
-//XIAOFENG6
 
 /* Instead of increasing this, you should create a hash table. */
 #define MAX_GRO_SKBS 8
@@ -2839,7 +2837,6 @@ out:
 	return ret;
 }
 
-//XIAOFENG6
 static DEFINE_PER_CPU(struct netif_deliver_stats, deliver_stats);
 
 static int netif_deliver_cpu(unsigned short dport)	
@@ -2944,7 +2941,6 @@ static int netif_deliver_skb(struct sk_buff *skb)
 
 	return -1;
 }
-//XIAOFENG6
 
 /**
  *	netif_receive_skb - process receive buffer from network
@@ -2970,12 +2966,10 @@ int netif_receive_skb(struct sk_buff *skb)
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int cpu, ret;
 
-	//XIAOFENG6
 	if (enable_receive_flow_deliver)
 		cpu = netif_deliver_skb(skb);
 	else
 		cpu = get_rps_cpu(skb->dev, skb, &rflow);
-	//XIAOFENG6
 
 	if (cpu >= 0)
 		ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
@@ -3965,7 +3959,6 @@ static const struct file_operations ptype_seq_fops = {
 
 };
 
-//XIAOFENG6
 static volatile unsigned steer_cpu_id;
 
 static struct netif_deliver_stats *steer_get_online(loff_t *pos)
@@ -4044,7 +4037,6 @@ static const struct file_operations steer_seq_fops = {
 	.release = seq_release,
 	.write   = steer_reset,
 };
-//XIAOFENG6
 
 static int __net_init dev_proc_net_init(struct net *net)
 {
@@ -4057,21 +4049,16 @@ static int __net_init dev_proc_net_init(struct net *net)
 	if (!proc_net_fops_create(net, "ptype", S_IRUGO, &ptype_seq_fops))
 		goto out_softnet;
 	
-	//XIAOFENG6
 	if (!proc_net_fops_create(net, "steer_stat", S_IRUGO, &steer_seq_fops))
 		goto out_ptype;
 
 	if (wext_proc_init(net))
-		//goto out_ptype;
 		goto out_steer;
-	//XIAOFENG6
 	rc = 0;
 out:
 	return rc;
-//XIAOFENG6
 out_steer:
 	proc_net_remove(net, "steer_stat");
-//XIAOFENG6
 out_ptype:
 	proc_net_remove(net, "ptype");
 out_softnet:

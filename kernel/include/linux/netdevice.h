@@ -185,7 +185,6 @@ struct neighbour;
 struct neigh_parms;
 struct sk_buff;
 
-//XIAOFENG6
 struct netif_deliver_stats
 {
 	unsigned long pass;
@@ -194,7 +193,6 @@ struct netif_deliver_stats
 	unsigned long steer_save;
 	unsigned long steer_err;
 };
-//XIAOFENG6
 
 struct netif_rx_stats
 {

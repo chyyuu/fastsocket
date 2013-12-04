@@ -6463,13 +6463,11 @@ static void __wake_up_common(wait_queue_head_t *q, unsigned int mode,
 	list_for_each_entry_safe(curr, next, &q->task_list, task_list) {
 		unsigned flags = curr->flags;
 
-		//XIAOFENG6
 		if (flags & WQ_FLAG_LOADBALANCE) {
 			curr->func(curr, mode, wake_flags, key);
 			list_move_tail(&curr->task_list, &q->task_list);
 			break;
 		}
-		//XIAOFENG6
 
 		if (curr->func(curr, mode, wake_flags, key) &&
 				(flags & WQ_FLAG_EXCLUSIVE) && !--nr_exclusive)
@@ -6506,9 +6504,7 @@ void __wake_up_locked(wait_queue_head_t *q, unsigned int mode)
 	__wake_up_common(q, mode, 1, 0, NULL);
 }
 
-//XIAOFENG6
 EXPORT_SYMBOL_GPL(__wake_up_locked);
-//XIAOFENG6
 
 void __wake_up_locked_key(wait_queue_head_t *q, unsigned int mode, void *key)
 {
@@ -7427,9 +7423,7 @@ out_put_task:
 	put_online_cpus();
 	return retval;
 }
-//XIAOFENG6
 EXPORT_SYMBOL(sched_setaffinity);
-//XIAOFENG6
 
 static int get_user_cpu_mask(unsigned long __user *user_mask_ptr, unsigned len,
 			     struct cpumask *new_mask)
@@ -7493,9 +7487,7 @@ out_unlock:
 
 	return retval;
 }
-//XIAOFENG6
 EXPORT_SYMBOL(sched_getaffinity);
-//XIAOFENG6
 
 /**
  * sys_sched_getaffinity - get the cpu affinity of a process
