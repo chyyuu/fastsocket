@@ -275,9 +275,8 @@ struct sock *__inet_lookup_listener(struct net *net,
 	int score, hiscore;
 
 	result = __inet_lookup_local_listener(net, hashinfo, daddr, hnum, dif);
-	if (result) {
+	if (result)
 		return result;
-	}
 
 	rcu_read_lock();
 begin:
