@@ -31,9 +31,25 @@
 
 extern int fsocket_get_dbg_level(void);
 
+DEFINE_RATELIMIT_STATE(fastsocket_ratelimit_state, 5 * HZ, 10);
+
+static inline int fastsocket_limit(void)
+{
+	return __ratelimit(&fastsocket_ratelimit_state);
+}
+
+#define DPRINTK(level, msg, args...) {}
+
+#ifndef DPRINTK
 #define DPRINTK(level, msg, args...) ({\
 	if (level < fsocket_get_dbg_level()) \
-		printk(KERN_DEBUG "[CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args); \
+		printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args); \
+	})
+#endif
+
+#define EPRINTK_LIMIT(level, msg, args...) ({\
+	if (fastsocket_limit() && level < fsocket_get_dbg_level()) \
+		printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args); \
 	})
 
 struct fsocket_alloc {
@@ -61,16 +77,6 @@ struct fsocket_ioctl_arg {
 			int flags;
 		}accept_op;
 
-		//struct socket_bind_op_t {
-		//	void *sockaddr;
-		//	int sockaddr_len;
-		//}bind_op;
-
-		//struct socket_connect_op_t {
-		//	void *sockaddr;
-		//	int sockaddr_len;
-		//}connect_op;
-
 		struct spawn_op_t {
 			int cpu;
 		}spawn_op;
@@ -85,14 +91,6 @@ struct fsocket_ioctl_arg {
 			u32 type;
 			u32 protocol;
 		}socket_op;
-
-		//struct socket_opt_op_t {
-		//	u32 fd;	
-		//	u32 level;
-		//	u32 optname;
-		//	char * optval;
-		//	u32 opt_len;
-		//}socket_opt_op;
 
 		struct epoll_op_t {
 			u32 epoll_fd;
