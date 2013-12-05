@@ -2883,37 +2883,31 @@ static int netif_deliver_cpu(unsigned short dport)
 
 static int netif_deliver_skb(struct sk_buff *skb)
 {
-	if (skb->protocol == htons(ETH_P_IP)) {
-	    struct iphdr *iph;
-	    int iphl;
+	if (skb->protocol != htons(ETH_P_IP))
+		return -1;
 
-	    if (pskb_may_pull(skb, sizeof(*iph))) {
-		u8 ip_proto;
-		iph = (struct iphdr *) skb->data;
-		ip_proto = iph->protocol;
-		iphl = iph->ihl;
+	if (pskb_may_pull(skb, sizeof(struct iphdr))) {
+		struct iphdr *iph = (struct iphdr *)skb->data;
+		int iphl = iph->ihl;
+		u8 ip_proto = iph->protocol;
+		
+		if (ip_proto != IPPROTO_TCP)
+			return -1;
 
-		if (ip_proto == IPPROTO_TCP) {
-		    struct tcphdr *th;
-
-		    if (pskb_may_pull(skb, (iphl * 4) + sizeof(*th))) {
+		if (pskb_may_pull(skb, (iphl * 4) + sizeof(struct tcphdr))) {
+			struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
 			struct sock *sk;
-
-			th = (struct tcphdr *)(skb->data + (iphl * 4));
-
+			
 			DPRINTK(INFO, "Incoming packet %u.%u.%u.%u:%u - %u.%u.%u.%u:%u", 
-				NIPQUAD(iph->saddr), ntohs(th->source),
-				NIPQUAD(iph->daddr), ntohs(th->dest));
-
+					NIPQUAD(iph->saddr), ntohs(th->source),
+					NIPQUAD(iph->daddr), ntohs(th->dest));
 			if (ntohs(th->source) < RESERVED_SERVICE_PORT) {
 				DPRINTK(INFO, "Packet source port < 1024, indicates it's from server\n");
-
 				return netif_deliver_cpu(ntohs(th->dest));
 			}
 
 			if (ntohs(th->dest) < RESERVED_SERVICE_PORT) {
 				DPRINTK(INFO, "Packet dest port < 1024, indicates it's from client\n");
-
 				__get_cpu_var(deliver_stats).pass++;
 
 				return -1;
@@ -2923,20 +2917,16 @@ static int netif_deliver_skb(struct sk_buff *skb)
 
 			if (sk) {		
 				DPRINTK(INFO, "Packet match listen socket, indicates it's from client\n");
-
 				skb->sk = sk;
 				__get_cpu_var(deliver_stats).pass++;
 
 				return -1;
 			} else {
-			//FIXME: Be careful to steer the packet, mis-steering can cause load balance problem
 			//FIXME: Should we lookup established table to make sure?
 				DPRINTK(INFO, "Packet not match listen socket, indicates it's from server\n");
 				return netif_deliver_cpu(ntohs(th->dest));
 			}
-		    }
 		}
-	    }
 	}
 
 	return -1;
