@@ -83,6 +83,8 @@ static inline void fsock_free_sock(struct socket *sock)
 {
 	kmem_cache_free(socket_cachep, sock);
 	percpu_sub(fastsockets_in_use, 1);
+
+	module_put(THIS_MODULE);
 }
 
 static void fastsock_destroy_inode(struct inode *inode)
@@ -100,6 +102,7 @@ static struct inode *fastsock_alloc_inode(struct super_block *sb)
 	ei = kmem_cache_alloc(socket_cachep, GFP_KERNEL);
 	if (!ei)
 		return NULL;
+
 	init_waitqueue_head(&ei->socket.wait);
 
 	ei->socket.fasync_list = NULL;
@@ -397,6 +400,11 @@ static struct socket *fsocket_alloc_socket(void)
 	if (sock != NULL) {
 		static const struct inode_operations empty_iops;
 		static const struct file_operations empty_fops;
+
+		if(!try_module_get(THIS_MODULE)) {
+			kmem_cache_free(socket_cachep, sock);
+			return NULL;
+		}
 
 		init_waitqueue_head(&sock->wait);
 
