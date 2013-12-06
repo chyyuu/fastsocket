@@ -64,7 +64,7 @@ extern struct kmem_cache *dentry_cache;
 static struct vfsmount *sock_mnt;
 
 static DEFINE_PER_CPU(int, fastsockets_in_use) = 0;
-//static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
+static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
 
 extern int inet_create(struct net *net, struct socket *sock, int protocol, int kern);
 
@@ -1135,14 +1135,15 @@ static inline int fsocket_local_accept(struct socket *sock, struct socket *newso
 
 static inline int fsocket_need_global_accept(void)
 {
-	return __get_cpu_var(hash_stats).global_accept & 0x1;
+	return percpu_read(global_spawn_accept) & 0x1;
+	//return __get_cpu_var(hash_stats).global_accept & 0x1;
 }
 
 static inline int fsocket_global_accept(struct socket *sock, struct socket *newsock, int flags)
 {
 	int ret;
 
-	//percpu_add(global_spawn_accept, 1);
+	percpu_add(global_spawn_accept, 1);
 
 	//FIXME: Is the policy good?
 	//if (percpu_read(global_spawn_accept) & 0x1) {
