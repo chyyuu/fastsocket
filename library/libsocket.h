@@ -1,5 +1,5 @@
-#ifndef _LINUX_FASTSOCKET_H
-#define _LINUX_FASTSOCKET_H
+#ifndef _LINUX_FASTSOCKET_LIB_H
+#define _LINUX_FASTSOCKET_LIB_H
 
 #include <linux/ioctl.h>
 
@@ -25,35 +25,17 @@ typedef unsigned int u32;
 #define FSOCKET_IOC_CONNECT _IO(IOC_ID, 0x16)
 #define FSOCKET_IOC_SPAWN _IO(IOC_ID, 0x17)
 
-#define O_NOVFS 04000000
-
-#define FSOCKET_ALERT 0x00
-#define FSOCKET_ERR 0x01
-#define FSOCKET_WARNING 0x02
-#define FSOCKET_INFO 0x03
-#define FSOCKET_DEBUG 0x04
-
 struct fsocket_ioctl_arg {
 	u32 fd;
 	u32 backlog;
 
 	union ops_arg {
 		struct socket_accept_op_t {
-			void *sockaddr; /*user sockaddr address*/
-			int *sockaddr_len; /* user sockaddr address len*/
+			void *sockaddr;
+			int *sockaddr_len;
 			int flags;
 		}accept_op;
 
-		//struct socket_bind_op_t {
-		//	void *sockaddr;
-		//	int sockaddr_len;
-		//}bind_op;
-
-		//struct socket_connect_op_t {
-		//	void *sockaddr;
-		//	int sockaddr_len;
-		//}connect_op;
-		
 		struct spawn_op_t {
 			int cpu;
 		}spawn_op;
@@ -68,14 +50,6 @@ struct fsocket_ioctl_arg {
 			u32 type;
 			u32 protocol;
 		}socket_op;
-
-		//struct socket_opt_op_t {
-		//	u32 fd;	
-		//	u32 level;
-		//	u32 optname;
-		//	char * optval;
-		//	u32 opt_len;
-		//}socket_opt_op;
 
 		struct epoll_op_t {
 			u32 epoll_fd;

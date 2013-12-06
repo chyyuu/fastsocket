@@ -72,8 +72,8 @@ struct fsocket_ioctl_arg {
 	u32 backlog;
 	union ops_arg {
 		struct socket_accept_op_t {
-			void *sockaddr; /*user sockaddr address*/
-			int *sockaddr_len; /* user sockaddr address len*/
+			void *sockaddr;
+			int *sockaddr_len;
 			int flags;
 		}accept_op;
 

@@ -16,12 +16,12 @@
 
 static int fsocket_channel_fd = -1;
 
-#define FSOCKET_DBG(level, msg, ...) \
+#define FSOCKET_ERR(msg, ...) \
 do {\
-	fprintf(stderr, "FATSOCKET LIBRARY:" msg, ##__VA_ARGS__);\
+	fprintf(stderr, "Fastsocket Library:" msg, ##__VA_ARGS__);\
 }while(0)
 
-#define INIT_FDSET_NUM	64
+#define INIT_FDSET_NUM	65536
 
 //TODO: Need Lock for Multi-thread programme
 
@@ -42,21 +42,18 @@ void fastsocket_init(void)
 
 	ret = open("/dev/fastsocket", O_RDONLY);
 	if (ret < 0) {
-		FSOCKET_DBG(FSOCKET_ERR, "Open fastsocket channel failed, please CHECK\n");
+		FSOCKET_ERR("Open fastsocket channel failed, please CHECK\n");
 		exit(-1);
 	}
 	fsocket_channel_fd = ret;
 
 	fsocket_fd_set = calloc(INIT_FDSET_NUM, sizeof(int));
 	if (!fsocket_fd_set) {
-		FSOCKET_DBG(FSOCKET_ERR, "Allocate memory for listen fd set failed\n");
+		FSOCKET_ERR("Allocate memory for listen fd set failed\n");
 		exit(-1);
 	}
 
 	fsocket_fd_num = INIT_FDSET_NUM;
-
-	//for (i = 0; i < INIT_FDSET_NUM; i++)
-	//	fsocket_fd_set[i] = 0;
 
         CPU_ZERO(&cmask);
 
@@ -65,7 +62,7 @@ void fastsocket_init(void)
 
         ret = sched_setaffinity(0, get_cpus(), &cmask);
 	if (ret < 0) {
-		FSOCKET_DBG(FSOCKET_ERR, "Clear process CPU affinity failed\n");
+		FSOCKET_ERR("Clear process CPU affinity failed\n");
 		exit(-1);
 	}
 
@@ -90,7 +87,7 @@ int fastsocket_expand_fdset(int fd)
 	if (fd >= fsocket_fd_num) {
 		fsocket_fd_set = calloc(fsocket_fd_num + INIT_FDSET_NUM, sizeof(int));
 		if (!fsocket_fd_set) {
-			FSOCKET_DBG(FSOCKET_ERR, "Re allocate memory for listen fd set failed\n");
+			FSOCKET_ERR("Re allocate memory for listen fd set failed\n");
 			arg.fd = fd;
 			ioctl(fsocket_channel_fd, FSOCKET_IOC_CLOSE, &arg);
 			errno = EMFILE;
@@ -116,14 +113,13 @@ int socket(int family, int type, int protocol)
 
 		fd = ioctl(fsocket_channel_fd, FSOCKET_IOC_SOCKET, &arg);
 		if (fd < 0)
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:create light socket failed!\n");
+			FSOCKET_ERR("FSOCKET:create light socket failed!\n");
 		else
 			fd = fastsocket_expand_fdset(fd);
 	} else {
 		if (!real_socket)
 			real_socket = dlsym(RTLD_NEXT, "socket");
 
-		//fd =  SYSCALL(socket, family, type, protocoal);
 		fd =  real_socket(family, type, protocol);
 	}
 
@@ -147,14 +143,12 @@ int listen(int fd, int backlog)
 			fsocket_fd_set[fd] = 1;
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_LISTEN, &arg);
-		//ret =  real_listen(fd, backlog);
 		if (ret < 0) {
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Listen failed!\n");
+			FSOCKET_ERR("FSOCKET:Listen failed!\n");
 			fsocket_fd_set[fd] = 0;
 		}
 
 	} else {
-		//ret =  SYSCALL(listen, fd, backlog);
 		ret =  real_listen(fd, backlog);
 	}
 
@@ -171,7 +165,7 @@ int listen_spawn(int fd)
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
 		if (ret < 0) {
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Listen failed!\n");
+			FSOCKET_ERR("FSOCKET:Listen failed!\n");
 		}
 	}
 
@@ -193,14 +187,13 @@ int accept(int fd, struct sockaddr *addr, socklen_t *addr_len)
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_ACCEPT, &arg);
 		if (ret < 0) {
 			if (errno != EAGAIN)
-				FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Accept failed!\n");
+				FSOCKET_ERR("FSOCKET:Accept failed!\n");
 		} else {
 			ret = fastsocket_expand_fdset(ret);
 		}
 	} else {
 		if (!real_accept)
 			real_accept = dlsym(RTLD_NEXT, "accept");
-		//ret =  SYSCALL(accept, fd, addr, addr_len);
 		ret = real_accept(fd, addr, addr_len);
 	}
 
@@ -221,12 +214,11 @@ int accept4(int fd, struct sockaddr *addr, socklen_t *addr_len, int flags)
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_ACCEPT, &arg);
 		if (ret < 0 && errno != EAGAIN) {
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Accept failed!\n");
+			FSOCKET_ERR("FSOCKET:Accept failed!\n");
 		}
 	} else {
 		if (!real_accept)
 			real_accept = dlsym(RTLD_NEXT, "accept4");
-		//ret =  SYSCALL(accept, fd, addr, addr_len);
 		ret = real_accept(fd, addr, addr_len);
 	}
 
@@ -246,63 +238,16 @@ int close(int fd)
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_CLOSE, &arg);
 		if (ret < 0) {
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Close failed!\n");
+			FSOCKET_ERR("FSOCKET:Close failed!\n");
 		}
 	} else {
 		if (!real_close)
 			real_close = dlsym(RTLD_NEXT, "close");
-		//ret = SYSCALL(close, fd);
 		ret = real_close(fd);
 	}
 
 	return ret;
 }
-/*
-
-int SYSCALL_DEFINE(write, int fd, char *buf, int buf_len)
-{
-	int ret;
-	struct fsocket_ioctl_arg arg;
-
-	if (fsocket_channel_fd != 0) {
-		arg.fd = fd;
-		arg.op.io_op.buf = buf;
-		arg.op.io_op.buf_len = buf_len;
-
-		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_WRITE, &arg);
-		if (ret < 0) {
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Write failed!\n");
-		}
-	} else {
-		ret = SYSCALL(write, buf, buf_len);
-	}
-
-	return ret;
-}
-
-
-int SYSCALL_DEFINE(read, int fd, char *buf, int buf_len)
-{
-	int ret;
-	struct fsocket_ioctl_arg arg;
-
-	if (fsocket_channel_fd != 0) {
-		arg.fd = fd;
-		arg.op.io_op.buf = buf;
-		arg.op.io_op.buf_len = buf_len;
-
-		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_READ, &arg);
-		if (ret < 0) {
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET:Read failed!\n");
-		}
-	} else {
-		ret = SYSCALL(read, buf, buf_len);
-	}
-
-	return ret;
-}
-
-*/
 
 int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
 {
@@ -317,9 +262,7 @@ int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
 		if (fsocket_fd_set[fd] && cmd == EPOLL_CTL_ADD) {
 			ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
 			if (ret < 0) {
-				FSOCKET_DBG(FSOCKET_ERR, "FSOCKET: spawn failed!\n");
-				//FIXME: as of now, ignore the spawn err.
-				//return ret;
+				FSOCKET_ERR("FSOCKET: spawn failed!\n");
 			}
 		}
 
@@ -329,7 +272,7 @@ int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_EPOLL_CTL, &arg);
 		if (ret < 0) {
-			FSOCKET_DBG(FSOCKET_ERR, "FSOCKET: epoll_ctl failed!\n");
+			FSOCKET_ERR("FSOCKET: epoll_ctl failed!\n");
 			return ret;
 		}	
 		
@@ -337,7 +280,6 @@ int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
 	} else {
 		if (!real_epoll_ctl)
 			real_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
-		//ret = SYSCALL(epoll_ctl, efd, cmd, fd, ev);
 		ret = real_epoll_ctl(efd, cmd, fd, ev);
 	}
 
