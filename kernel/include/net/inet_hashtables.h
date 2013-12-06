@@ -42,17 +42,18 @@ struct inet_hash_stats
 	unsigned long	common_accept;
 	unsigned long	local_accept;
 	unsigned long	global_accept;
-	
 	unsigned long	common_accept_failed;
 	unsigned long	local_accept_failed;
 	unsigned long	global_accept_failed;
+	unsigned long	common_accept_again;
+	unsigned long	local_accept_again;
+	unsigned long	global_accept_again;
 
 	unsigned long	local_listen_lookup;
 	unsigned long 	global_listen_lookup;
 
 	unsigned 	local_listen_hash;
 	unsigned	local_listen_unhash;
-
 	unsigned 	global_listen_hash;
 	unsigned	global_listen_unhash;
 };
