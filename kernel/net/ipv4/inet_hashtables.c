@@ -26,9 +26,6 @@
 
 #include <linux/log2.h>
 
-//#define DPRINTK(klevel, fmt, args...) printk(KERN_##klevel "[Hydra Channel]" " [CPU%d] %s:%d\t" fmt, smp_processor_id(), __FUNCTION__ , __LINE__, ## args)
-#define DPRINTK(klevel, fmt, args...)
-
 DEFINE_PER_CPU(struct inet_hash_stats, hash_stats);
 EXPORT_PER_CPU_SYMBOL(hash_stats);
 
@@ -733,8 +730,6 @@ int rfd_inet_hash_connect(struct inet_timewait_death_row *death_row,
 		round_cpu_num = roundup_pow_of_two(cpu_num);
 	mask = ~(round_cpu_num - 1);
 
-	DPRINTK(INFO, "Total cpu num: %d - Round cpu num: %d - cpu mask : %x - Current cpu: %d\n", cpu_num, round_cpu_num, mask, cpu);
-
 	if (!snum) {
 		int i, remaining, low, high, port;
 		static u32 hint;
@@ -742,22 +737,15 @@ int rfd_inet_hash_connect(struct inet_timewait_death_row *death_row,
 		struct hlist_node *node;
 		struct inet_timewait_sock *tw = NULL;
 
-		DPRINTK(INFO, "Hint: %u - base offset: %u - new offset: %u\n", 
-			hint, port_offset, offset);
-
 		inet_get_local_port_range(&low, &high);
 		low &= mask;
 		high &= mask;
 		remaining = high - low;
 
-		DPRINTK(INFO, "Port pool:%d [%d - %d]\n", remaining, low, high);
-
 		local_bh_disable();
 		for (i = 0; i <= remaining; i = i + round_cpu_num) {
 			port = low + (i + offset + cpu) % remaining;
 			
-			DPRINTK(INFO, "Target port %d\n", port);
-
 			if (inet_is_reserved_local_port(port))
 				continue;
 			head = &hinfo->bhash[inet_bhashfn(net, port,
@@ -798,8 +786,6 @@ int rfd_inet_hash_connect(struct inet_timewait_death_row *death_row,
 
 ok:
 		hint += (i + 1) * round_cpu_num;
-
-		DPRINTK(INFO, "Port selected:%u - hint updated: %u\n", port, hint);
 
 		/* Head lock still held and bh's disabled */
 		inet_bind_hash(sk, tb, port);
