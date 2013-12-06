@@ -139,9 +139,6 @@
 #include <net/inet_hashtables.h>
 #include <net/tcp.h>
 
-//#define DPRINTK(klevel, fmt, args...) printk(KERN_##klevel "[Hydra Channel]" " [CPU%d] %s:%d\t" fmt, smp_processor_id(), __FUNCTION__ , __LINE__, ## args)
-#define DPRINTK(klevel, fmt, args...) 
-
 /* Instead of increasing this, you should create a hash table. */
 #define MAX_GRO_SKBS 8
 
@@ -2858,21 +2855,12 @@ static int netif_deliver_cpu(unsigned short dport)
 	new_cpu = dport & mask;
 
 	if (new_cpu >= cpu_num) {
-		DPRINTK(ERR, "masked destination port [%d]beyond local CPU mask [%d-%d]\n", 
-			new_cpu, cpu_num, round_cpu_num);
-
 		__get_cpu_var(deliver_stats).steer_err++;
-
 		return -1;
 	}
 	if (new_cpu == cur_cpu) {
-		DPRINTK(INFO, "God helps, packet match local CPU, no need to steer\n");
-		__get_cpu_var(deliver_stats).steer_save++;
-
 		return -1;
 	}
-
-	DPRINTK(INFO, "Packet id steered to CPU %d\n", new_cpu);
 
 	__get_cpu_var(deliver_stats).steer_done++;
 
@@ -2898,32 +2886,23 @@ static int netif_deliver_skb(struct sk_buff *skb)
 			struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
 			struct sock *sk;
 			
-			DPRINTK(INFO, "Incoming packet %u.%u.%u.%u:%u - %u.%u.%u.%u:%u", 
-					NIPQUAD(iph->saddr), ntohs(th->source),
-					NIPQUAD(iph->daddr), ntohs(th->dest));
 			if (ntohs(th->source) < RESERVED_SERVICE_PORT) {
-				DPRINTK(INFO, "Packet source port < 1024, indicates it's from server\n");
 				return netif_deliver_cpu(ntohs(th->dest));
 			}
 
 			if (ntohs(th->dest) < RESERVED_SERVICE_PORT) {
-				DPRINTK(INFO, "Packet dest port < 1024, indicates it's from client\n");
 				__get_cpu_var(deliver_stats).pass++;
-
 				return -1;
 			}
 
 			sk = __inet_lookup_listener(&init_net, &tcp_hashinfo, iph->daddr, ntohs(th->dest), skb->dev->ifindex);
 
 			if (sk) {		
-				DPRINTK(INFO, "Packet match listen socket, indicates it's from client\n");
 				skb->sk = sk;
 				__get_cpu_var(deliver_stats).pass++;
-
 				return -1;
 			} else {
 			//FIXME: Should we lookup established table to make sure?
-				DPRINTK(INFO, "Packet not match listen socket, indicates it's from server\n");
 				return netif_deliver_cpu(ntohs(th->dest));
 			}
 		}
