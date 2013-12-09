@@ -155,23 +155,6 @@ int listen(int fd, int backlog)
 	return ret;
 }
 
-int listen_spawn(int fd)
-{
-	int ret = -1;
-	struct fsocket_ioctl_arg arg;
-
-	if (fsocket_channel_fd != 0) {
-		arg.fd = fd;
-
-		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN, &arg);
-		if (ret < 0) {
-			FSOCKET_ERR("FSOCKET:Listen failed!\n");
-		}
-	}
-
-	return ret;
-}
-
 int accept(int fd, struct sockaddr *addr, socklen_t *addr_len)
 {
 	static int (*real_accept)(int, struct sockaddr *, socklen_t *) = NULL;
