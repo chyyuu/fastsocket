@@ -1125,7 +1125,7 @@ static inline int fsocket_local_accept(struct socket *sock, struct socket *newso
 	if (!ret)
 		__get_cpu_var(hash_stats).local_accept++;
 	else {
-		if unlikely((ret != -EAGAIN))
+		if (unlikely(ret != -EAGAIN))
 			__get_cpu_var(hash_stats).local_accept_failed++;
 		else
 			__get_cpu_var(hash_stats).local_accept_again++;

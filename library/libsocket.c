@@ -72,8 +72,8 @@ void fastsocket_init(void)
 __attribute__((destructor))
 void fastsocket_uninit(void)
 {
-	free(fsocket_fd_set);
 	close(fsocket_channel_fd);
+	free(fsocket_fd_set);
 
 	return;
 }
