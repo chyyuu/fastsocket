@@ -5,6 +5,7 @@ Summary:        Library that enables application to use fastsocket
 Source:		libfsocket-1.0.0.tar
 Group:          System Environment/Libraries
 License:        GPL
+BuildRoot:	%_topdir/BUILDROOT/
 
 %description
 This program is intended to use with fastsocket kernel feature together, 
