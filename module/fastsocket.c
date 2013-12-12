@@ -35,9 +35,9 @@ MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
-static int enable_listen_spawn = 0;
+static int enable_listen_spawn = 2;
 extern int enable_receive_flow_deliver;
-static int enable_fast_epoll = 0;
+static int enable_fast_epoll = 1;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);
@@ -68,7 +68,7 @@ static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
 
 extern int inet_create(struct net *net, struct socket *sock, int protocol, int kern);
 
-static int fsocket_filp_close(struct file *file);
+static inline int fsocket_filp_close(struct file *file);
 
 static inline void fsock_release_sock(struct socket *sock)
 {
