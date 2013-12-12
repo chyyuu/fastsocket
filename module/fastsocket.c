@@ -1559,9 +1559,12 @@ static void __exit fastsocket_exit(void)
 
 	DPRINTK(DEBUG, "Fastsocket super block 0x%p ops 0x%p\n", sock_mnt->mnt_sb, sock_mnt->mnt_sb->s_op);
 	mntput(sock_mnt);
+
 	unregister_filesystem(&fastsock_fs_type);
 
 	kmem_cache_destroy(socket_cachep);
+
+	enable_receive_flow_deliver = 0;
 
 	printk(KERN_INFO "Remove Fastsocket Module\n");
 }
