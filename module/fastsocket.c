@@ -31,7 +31,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-
+MODULE_VERSION("1.0.0");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
@@ -45,9 +45,9 @@ module_param(enable_receive_flow_deliver, int, 0);
 module_param(enable_fast_epoll, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
-MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale[Default], 1 = Process affinity required, 2 = Autoset process affinity ");
-MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled ");
-MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disbale[Default], 1 = Enabled ");
+MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
+MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled");
+MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disbale, 1 = Enabled[Default]");
 
 int inline fsocket_get_dbg_level(void)
 {
@@ -1548,7 +1548,14 @@ static int __init  fastsocket_init(void)
 		return ret;
 	}
 
-	printk(KERN_INFO "Load Fastsocket Module\n");
+	printk(KERN_INFO "Fastsocket: Load Module\n");
+
+	if (enable_listen_spawn)
+		printk(KERN_INFO "Fastsocket: Enable Listen Spawn[Mode-%d]\n", enable_listen_spawn);
+	if (enable_receive_flow_deliver)
+		printk(KERN_INFO "Fastsocket: Enable Recieve Flow Deliver\n");
+	if (enable_fast_epoll)
+		printk(KERN_INFO "Fastsocket: Enable Fast Epoll\n");
 
 	return ret;
 }
@@ -1564,9 +1571,13 @@ static void __exit fastsocket_exit(void)
 
 	kmem_cache_destroy(socket_cachep);
 
-	enable_receive_flow_deliver = 0;
+	if (enable_receive_flow_deliver) {
+		enable_receive_flow_deliver = 0;
+		printk(KERN_INFO "Fastsocket: Disable Recieve Flow Deliver\n");
+	}
 
-	printk(KERN_INFO "Remove Fastsocket Module\n");
+
+	printk(KERN_INFO "Fastsocket: Remove Module\n");
 }
 
 module_init(fastsocket_init)
