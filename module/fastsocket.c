@@ -586,12 +586,12 @@ static void fsocket_copy_socket(struct socket *oldsock, struct socket *newsock)
 	inet_sk(newsock->sk)->freebind = inet_sk(oldsock->sk)->freebind;
 	inet_sk(newsock->sk)->transparent = inet_sk(oldsock->sk)->transparent;
 	/* TCP_MAXSEG */
-	tcp_sk(newsock->sk)->rx_opt = tcp_sk(oldsock->sk)->rx_opt;
+	tcp_sk(newsock->sk)->rx_opt.user_mss = tcp_sk(oldsock->sk)->rx_opt.user_mss;
 	/* TCP_DEFER_ACCEPT */
 	inet_csk(newsock->sk)->icsk_accept_queue.rskq_defer_accept = 
 		inet_csk(oldsock->sk)->icsk_accept_queue.rskq_defer_accept;
 	/* TCP_QUICKACK */
-	inet_csk(newsock->sk)->icsk_ack = inet_csk(oldsock->sk)->icsk_ack;
+	inet_csk(newsock->sk)->icsk_ack.pingpong = inet_csk(oldsock->sk)->icsk_ack.pingpong;
 }
 
 static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **newsock)
