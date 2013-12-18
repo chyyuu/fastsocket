@@ -773,7 +773,7 @@ static void sock_aio_dtor(struct kiocb *iocb)
 	kfree(iocb->private);
 }
 
-static ssize_t sock_sendpage(struct file *file, struct page *page,
+ssize_t sock_sendpage(struct file *file, struct page *page,
 			     int offset, size_t size, loff_t *ppos, int more)
 {
 	struct socket *sock;
@@ -787,6 +787,7 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
 
 	return kernel_sendpage(sock, page, offset, size, flags);
 }
+EXPORT_SYMBOL(sock_sendpage);
 
 ssize_t sock_splice_read(struct file *file, loff_t *ppos,
 			        struct pipe_inode_info *pipe, size_t len,
