@@ -51,6 +51,8 @@ struct inet_hash_stats
 
 	unsigned long	local_listen_lookup;
 	unsigned long 	global_listen_lookup;
+	unsigned long	local_established_lookup;
+	unsigned long 	global_established_lookup;
 
 	unsigned 	local_listen_hash;
 	unsigned	local_listen_unhash;
@@ -141,6 +143,14 @@ struct inet_listen_hashtable {
 	struct inet_listen_hashbucket  listening_hash[INET_LHTABLE_SIZE];
 };
 
+struct inet_established_hashtable
+{
+	struct inet_ehash_bucket	*ehash;
+	spinlock_t			ehash_lock;
+	unsigned int			ehash_size;
+	//unsigned int			ehash_locks_mask;
+};	
+
 struct inet_hashinfo {
 	/* This is for sockets with full identity only.  Sockets here will
 	 * always be without wildcards and will have the following invariant:
@@ -154,6 +164,7 @@ struct inet_hashinfo {
 	unsigned int			ehash_size;
 	unsigned int			ehash_locks_mask;
 
+	struct inet_established_hashtable	__percpu *local_established_hash;
 	/* Ok, let's try this, I give up, we do need a local binding
 	 * TCP hash as well as the others for fast bind/connect.
 	 */
@@ -187,11 +198,25 @@ static inline struct inet_ehash_bucket *inet_ehash_bucket(
 	return &hashinfo->ehash[hash & (hashinfo->ehash_size - 1)];
 }
 
+static inline struct inet_ehash_bucket *inet_local_ehash_bucket(
+	struct inet_established_hashtable *hashinfo,
+	unsigned int hash)
+{
+	return &hashinfo->ehash[hash & (hashinfo->ehash_size - 1)];
+}
+
 static inline spinlock_t *inet_ehash_lockp(
 	struct inet_hashinfo *hashinfo,
 	unsigned int hash)
 {
 	return &hashinfo->ehash_locks[hash & hashinfo->ehash_locks_mask];
+}
+
+static inline spinlock_t *inet_local_ehash_lockp(
+	struct inet_established_hashtable *hashinfo,
+	unsigned int hash)
+{
+	return &hashinfo->ehash_lock;
 }
 
 static inline int inet_ehash_locks_alloc(struct inet_hashinfo *hashinfo)
@@ -225,6 +250,11 @@ static inline int inet_ehash_locks_alloc(struct inet_hashinfo *hashinfo)
 	}
 	hashinfo->ehash_locks_mask = size - 1;
 	return 0;
+}
+
+static inline void inet_local_ehash_locks_alloc(struct inet_established_hashtable *hashinfo)
+{
+	spin_lock_init(&hashinfo->ehash_lock);
 }
 
 static inline void inet_ehash_locks_free(struct inet_hashinfo *hashinfo)
@@ -293,11 +323,19 @@ extern struct sock *__inet_lookup_listener(struct net *net,
 					   const unsigned short hnum,
 					   const int dif);
 
+extern struct sock *__inet_lookup_local_listener(struct net *net,
+					   struct inet_hashinfo *hashinfo,
+					   const __be32 daddr,
+					   const unsigned short hnum,
+					   const int dif);
+
 static inline struct sock *inet_lookup_listener(struct net *net,
 		struct inet_hashinfo *hashinfo,
 		__be32 daddr, __be16 dport, int dif)
 {
-	return __inet_lookup_listener(net, hashinfo, daddr, ntohs(dport), dif);
+	struct sock *sk = __inet_lookup_local_listener(net, hashinfo, daddr, ntohs(dport), dif);
+	
+	return sk ? : __inet_lookup_listener(net, hashinfo, daddr, ntohs(dport), dif);
 }
 
 /* Socket demux engine toys. */
@@ -368,15 +406,35 @@ extern struct sock * __inet_lookup_established(struct net *net,
 		const __be32 saddr, const __be16 sport,
 		const __be32 daddr, const u16 hnum, const int dif);
 
+extern struct sock * __inet_lookup_local_established(struct net *net,
+		struct inet_hashinfo *hashinfo,
+		const __be32 saddr, const __be16 sport,
+		const __be32 daddr, const u16 hnum, const int dif);
+
 static inline struct sock *
 	inet_lookup_established(struct net *net, struct inet_hashinfo *hashinfo,
 				const __be32 saddr, const __be16 sport,
 				const __be32 daddr, const __be16 dport,
 				const int dif)
 {
-	return __inet_lookup_established(net, hashinfo, saddr, sport, daddr,
+	struct sock *sk = __inet_lookup_local_established(net, hashinfo, saddr, 
+			sport, daddr, ntohs(dport), dif);
+
+	return sk ? : __inet_lookup_established(net, hashinfo, saddr, sport, daddr,
 					 ntohs(dport), dif);
 }
+
+extern struct sock *__inet_lookup_local(struct net *net,
+					 struct inet_hashinfo *hashinfo,
+					 const __be32 saddr, const __be16 sport,
+					 const __be32 daddr, const __be16 dport,
+					 const int dif);
+
+extern struct sock *__inet_lookup_global(struct net *net,
+					 struct inet_hashinfo *hashinfo,
+					 const __be32 saddr, const __be16 sport,
+					 const __be32 daddr, const __be16 dport,
+					 const int dif);
 
 static inline struct sock *__inet_lookup(struct net *net,
 					 struct inet_hashinfo *hashinfo,
@@ -384,11 +442,10 @@ static inline struct sock *__inet_lookup(struct net *net,
 					 const __be32 daddr, const __be16 dport,
 					 const int dif)
 {
-	u16 hnum = ntohs(dport);
-	struct sock *sk = __inet_lookup_established(net, hashinfo,
-				saddr, sport, daddr, hnum, dif);
-
-	return sk ? : __inet_lookup_listener(net, hashinfo, daddr, hnum, dif);
+	struct sock *sk = __inet_lookup_local(net, hashinfo,
+				saddr, sport, daddr, dport, dif);
+	return sk ? : __inet_lookup_global(net, hashinfo, 
+				saddr, sport, daddr, dport, dif);
 }
 
 static inline struct sock *inet_lookup(struct net *net,

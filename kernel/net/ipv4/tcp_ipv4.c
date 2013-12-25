@@ -1612,8 +1612,12 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	TCP_SKB_CB(skb)->sacked	 = 0;
 
 	sk = __inet_lookup_skb(&tcp_hashinfo, skb, th->source, th->dest);
-	if (!sk)
+	if (!sk) {
+		//printk(KERN_INFO NIPQUAD_FMT":%d matches no socket\n", NIPQUAD(iph->daddr), ntohs(th->dest));
 		goto no_tcp_socket;
+	}
+		
+	//printk(KERN_INFO NIPQUAD_FMT":%d matches socket[%d]\n", NIPQUAD(iph->daddr), ntohs(th->dest), sk->sk_state);
 
 process:
 	if (sk->sk_state == TCP_TIME_WAIT)
@@ -1676,6 +1680,8 @@ discard_and_relse:
 	goto discard_it;
 
 do_time_wait:
+	//printk(KERN_INFO NIPQUAD_FMT":%d match TW\n", NIPQUAD(iph->daddr), ntohs(th->dest));
+
 	if (!xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {
 		inet_twsk_put(inet_twsk(sk));
 		goto discard_it;
@@ -1687,6 +1693,7 @@ do_time_wait:
 		goto discard_it;
 	}
 	switch (tcp_timewait_state_process(inet_twsk(sk), skb, th)) {
+		//printk(KERN_INFO NIPQUAD_FMT":%d TW process %d\n", NIPQUAD(iph->daddr), ntohs(th->dest), state);
 	case TCP_TW_SYN: {
 		struct sock *sk2 = inet_lookup_listener(dev_net(skb->dev),
 							&tcp_hashinfo,
@@ -1696,8 +1703,11 @@ do_time_wait:
 			inet_twsk_deschedule(inet_twsk(sk), &tcp_death_row);
 			inet_twsk_put(inet_twsk(sk));
 			sk = sk2;
+			//printk(KERN_INFO NIPQUAD_FMT":%d TW_SYN works\n", NIPQUAD(iph->daddr), ntohs(th->dest));
 			goto process;
 		}
+			//printk(KERN_INFO NIPQUAD_FMT":%d TW_SYN fails\n", NIPQUAD(iph->daddr), ntohs(th->dest));
+
 		/* Fall through to ACK */
 	}
 	case TCP_TW_ACK:

@@ -31,21 +31,23 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.1");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
-static int enable_listen_spawn = 2;
+static int enable_percpu_listen = 2;
+//static int enable_percpu_established = 0;
 extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
 
 module_param(enable_fastsocket_debug,int, 0);
-module_param(enable_listen_spawn, int, 0);
+module_param(enable_percpu_listen, int, 0);
 module_param(enable_receive_flow_deliver, int, 0);
 module_param(enable_fast_epoll, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
-MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
+MODULE_PARM_DESC(enable_percpu_listen, " Control Percpu Listen Table: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
+MODULE_PARM_DESC(enable_percpu_established, " Control Percpu Establihsed Table: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disbale, 1 = Enabled[Default]");
 
@@ -754,6 +756,8 @@ static int fsocket_socket(int flags)
 		goto free_sock;
 	}
 
+	sock_set_flag(sock->sk, SOCK_PERCPU);
+
 	err = fsock_map_fd(sock, flags);
 	if (err < 0) {
 		EPRINTK_LIMIT(ERR, "Map Socket FD failed\n");
@@ -875,7 +879,7 @@ static int fsocket_process_affinity_check(void)
 	struct cpumask omask;
 	struct socket *sock;
 	
-	if (enable_listen_spawn == DISABLE_LISTEN_SPAWN) {
+	if (enable_percpu_listen == DISABLE_LISTEN_SPAWN) {
 		EPRINTK_LIMIT(ERR, "Module para disable listen-spawn feature\n");
 		return -EINVAL;
 	}
@@ -900,7 +904,7 @@ static int fsocket_process_affinity_check(void)
 		return ccpu;
 	}
 
-	if (enable_listen_spawn != ENABLE_LISTEN_SPAWN_AUTOSET_AFFINITY) {
+	if (enable_percpu_listen != ENABLE_LISTEN_SPAWN_AUTOSET_AFFINITY) {
 		EPRINTK_LIMIT(ERR, "Module para disable autoset affinity for listen-spawn\n");
 		return -EPERM;
 	}
@@ -1230,6 +1234,8 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		}
 	}
 
+	sock_set_flag(sock->sk, SOCK_PERCPU);
+
 	if (err < 0) {
 		if (err != -EAGAIN)
 			EPRINTK_LIMIT(ERR, "Accept failed [%d]\n", err);
@@ -1409,7 +1415,7 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 	/* Only use module epoll_ctl when listen spawn is enabled,
 	 * fastepoll is taken care of by kernel source.
 	 */
-	if (!enable_listen_spawn) {
+	if (!enable_percpu_listen) {
 		DPRINTK(DEBUG, "Fastsocket epoll is disabled\n");
 		ret = sys_epoll_ctl(arg.op.epoll_op.epoll_fd, arg.op.epoll_op.ep_ctl_cmd, 
 				arg.fd, arg.op.epoll_op.ev);
@@ -1550,8 +1556,8 @@ static int __init  fastsocket_init(void)
 
 	printk(KERN_INFO "Fastsocket: Load Module\n");
 
-	if (enable_listen_spawn)
-		printk(KERN_INFO "Fastsocket: Enable Listen Spawn[Mode-%d]\n", enable_listen_spawn);
+	if (enable_percpu_listen)
+		printk(KERN_INFO "Fastsocket: Enable Listen Spawn[Mode-%d]\n", enable_percpu_listen);
 	if (enable_receive_flow_deliver)
 		printk(KERN_INFO "Fastsocket: Enable Recieve Flow Deliver\n");
 	if (enable_fast_epoll)

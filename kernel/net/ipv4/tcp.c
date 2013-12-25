@@ -2904,6 +2904,7 @@ void __init tcp_init(void)
 	struct sk_buff *skb = NULL;
 	unsigned long nr_pages, limit;
 	int order, i, max_share;
+	int cpu_idx, k;
 
 	BUILD_BUG_ON(sizeof(struct tcp_skb_cb) > sizeof(skb->cb));
 
@@ -2936,6 +2937,41 @@ void __init tcp_init(void)
 	}
 	if (inet_ehash_locks_alloc(&tcp_hashinfo))
 		panic("TCP: failed to alloc ehash_locks");
+
+	tcp_hashinfo.local_established_hash = alloc_percpu(struct inet_established_hashtable);
+	if (!tcp_hashinfo.local_established_hash)
+		panic("TCP: failed to alloc per-cpu local ehash info");
+
+	for_each_online_cpu(cpu_idx)
+	{
+		struct  inet_established_hashtable *local_ehash = per_cpu_ptr(tcp_hashinfo.local_established_hash, cpu_idx);
+
+		local_ehash->ehash = 
+			alloc_large_system_hash_node("Local TCP established", 
+					sizeof(struct inet_ehash_bucket),
+					thash_entries,
+					(totalram_pages >= 128 * 1024) ?
+					13 : 15,
+					0,
+					&local_ehash->ehash_size,
+					NULL,
+					thash_entries ? 0 : 512 * 1024 * 2 / num_online_cpus(), 
+					cpu_to_node(cpu_idx));
+
+		local_ehash->ehash_size = 1 << local_ehash->ehash_size;
+
+		//DPRINTK(INFO, "Allocate %u entry for CPU %u local ehash table\n", 
+		//	local_ehash->ehash_size, cpu_idx);
+
+		for (k = 0; k < local_ehash->ehash_size; k++) {
+			INIT_HLIST_NULLS_HEAD(&local_ehash->ehash[k].chain, k);
+			INIT_HLIST_NULLS_HEAD(&local_ehash->ehash[k].twchain, k);
+		}
+
+		inet_local_ehash_locks_alloc(local_ehash);
+	}
+
+
 	tcp_hashinfo.bhash =
 		alloc_large_system_hash("TCP bind",
 					sizeof(struct inet_bind_hashbucket),

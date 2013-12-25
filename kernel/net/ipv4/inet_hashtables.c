@@ -181,7 +181,7 @@ static inline int compute_score(struct sock *sk, struct net *net,
 	return score;
 }
 
-static struct sock * __inet_lookup_local_listener(struct net *net, 
+struct sock * __inet_lookup_local_listener(struct net *net, 
 					   struct inet_hashinfo *hashinfo,
 					   const __be32 daddr, const unsigned short hum,
 					   const int dif)
@@ -250,6 +250,7 @@ begin1:
 
 	return result;
 }
+EXPORT_SYMBOL(__inet_lookup_local_listener);
 
 
 /*
@@ -270,10 +271,6 @@ struct sock *__inet_lookup_listener(struct net *net,
 	unsigned int hash = inet_lhashfn_ex(net, daddr, hnum);
 	struct inet_listen_hashbucket *ilb = &hashinfo->listening_hash[hash];
 	int score, hiscore;
-
-	result = __inet_lookup_local_listener(net, hashinfo, daddr, hnum, dif);
-	if (result)
-		return result;
 
 	rcu_read_lock();
 begin:
@@ -336,6 +333,86 @@ begin1:
 	return result;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_listener);
+
+struct sock * __inet_lookup_local_established(struct net *net,
+				  struct inet_hashinfo *hashinfo,
+				  const __be32 saddr, const __be16 sport,
+				  const __be32 daddr, const u16 hnum,
+				  const int dif)
+{
+	INET_ADDR_COOKIE(acookie, saddr, daddr)
+	const __portpair ports = INET_COMBINED_PORTS(sport, hnum);
+	struct sock *sk;
+	const struct hlist_nulls_node *node;
+	/* Optimize here for direct hit, only listening connections can
+	 * have wildcards anyways.
+	 */
+
+	struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, smp_processor_id());
+
+	unsigned int hash = inet_ehashfn(net, daddr, hnum, saddr, sport);
+	unsigned int slot = hash & (iet->ehash_size - 1);
+	struct inet_ehash_bucket *head = &iet->ehash[slot];
+
+	//DPRINTK(INFO, "Lookup established port: %d\n", hnum);
+
+	rcu_read_lock();
+begin:
+	sk_nulls_for_each_rcu(sk, node, &head->chain) {
+		if (INET_MATCH(sk, net, hash, acookie,
+					saddr, daddr, ports, dif)) {
+			if (unlikely(!atomic_inc_not_zero(&sk->sk_refcnt)))
+				goto begintw;
+			if (unlikely(!INET_MATCH(sk, net, hash, acookie,
+				saddr, daddr, ports, dif))) {
+				sock_put(sk);
+				goto begin;
+			}
+			goto out;
+		}
+	}
+	/*
+	 * if the nulls value we got at the end of this lookup is
+	 * not the expected one, we must restart lookup.
+	 * We probably met an item that was moved to another chain.
+	 */
+	if (get_nulls_value(node) != slot)
+		goto begin;
+
+begintw:
+	/* Must check for a TIME_WAIT'er before going to listener hash. */
+	sk_nulls_for_each_rcu(sk, node, &head->twchain) {
+		if (INET_TW_MATCH(sk, net, hash, acookie,
+					saddr, daddr, ports, dif)) {
+			if (unlikely(!atomic_inc_not_zero(&sk->sk_refcnt))) {
+				sk = NULL;
+				goto out;
+			}
+			if (unlikely(!INET_TW_MATCH(sk, net, hash, acookie,
+				 saddr, daddr, ports, dif))) {
+				sock_put(sk);
+				goto begintw;
+			}
+			goto out;
+		}
+	}
+	/*
+	 * if the nulls value we got at the end of this lookup is
+	 * not the expected one, we must restart lookup.
+	 * We probably met an item that was moved to another chain.
+	 */
+	if (get_nulls_value(node) != slot)
+		goto begintw;
+	sk = NULL;
+out:
+	rcu_read_unlock();
+
+	if (sk)
+		__get_cpu_var(hash_stats).local_established_lookup++;
+
+	return sk;
+}
+EXPORT_SYMBOL_GPL(__inet_lookup_local_established);
 
 struct sock * __inet_lookup_established(struct net *net,
 				  struct inet_hashinfo *hashinfo,
@@ -404,9 +481,50 @@ begintw:
 	sk = NULL;
 out:
 	rcu_read_unlock();
+
+	if (sk)
+		__get_cpu_var(hash_stats).global_established_lookup++;
+
 	return sk;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_established);
+
+struct sock *__inet_lookup_local(struct net *net,
+					 struct inet_hashinfo *hashinfo,
+					 const __be32 saddr, const __be16 sport,
+					 const __be32 daddr, const __be16 dport,
+					 const int dif)
+{
+	u16 hnum = ntohs(dport);
+
+	struct sock *sk = __inet_lookup_local_established(net, hashinfo,
+				saddr, sport, daddr, hnum, dif);
+
+	//if (!sk)
+	//	printk(KERN_INFO "Local ehash table miss for port %d\n", hnum);
+
+	return sk ? : __inet_lookup_local_listener(net, hashinfo, daddr, hnum, dif);
+}
+
+EXPORT_SYMBOL_GPL(__inet_lookup_local);
+
+struct sock *__inet_lookup_global(struct net *net,
+					 struct inet_hashinfo *hashinfo,
+					 const __be32 saddr, const __be16 sport,
+					 const __be32 daddr, const __be16 dport,
+					 const int dif)
+{
+	u16 hnum = ntohs(dport);
+
+	struct sock *sk = __inet_lookup_established(net, hashinfo,
+				saddr, sport, daddr, hnum, dif);
+
+	//if (!sk)
+	//	printk(KERN_INFO "Global ehash table miss for port %d\n", hnum);
+
+	return sk ? : __inet_lookup_listener(net, hashinfo, daddr, hnum, dif);
+}
+EXPORT_SYMBOL_GPL(__inet_lookup_global);
 
 /* called with local bh disabled */
 static int __inet_check_established(struct inet_timewait_death_row *death_row,
@@ -427,6 +545,10 @@ static int __inet_check_established(struct inet_timewait_death_row *death_row,
 	struct sock *sk2;
 	const struct hlist_nulls_node *node;
 	struct inet_timewait_sock *tw;
+
+	//FIXME: What if bind port before connect. 
+	if (sock_flag(sk, SOCK_PERCPU))
+		return -EADDRNOTAVAIL;
 
 	spin_lock(lock);
 
@@ -487,6 +609,26 @@ static inline u32 inet_sk_port_offset(const struct sock *sk)
 					  inet->dport);
 }
 
+void __inet_hash_local_nolisten(struct sock *sk)
+{	
+	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
+	struct hlist_nulls_head *list;
+	spinlock_t *lock;
+	struct inet_ehash_bucket *head;
+
+	struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, smp_processor_id());
+
+	head = inet_local_ehash_bucket(iet, sk->sk_hash);
+	list = &head->chain;
+	//lock = &iet->ehash_lock;
+	lock = inet_local_ehash_lockp(iet, sk->sk_hash);
+
+	spin_lock(lock);
+	__sk_nulls_add_node_rcu(sk, list);
+	spin_unlock(lock);
+	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
+}
+
 void __inet_hash_nolisten(struct sock *sk)
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
@@ -497,6 +639,12 @@ void __inet_hash_nolisten(struct sock *sk)
 	WARN_ON(!sk_unhashed(sk));
 
 	sk->sk_hash = inet_sk_ehashfn(sk);
+
+	if (sock_flag(sk, SOCK_PERCPU)) {
+		__inet_hash_local_nolisten(sk);
+		return;
+	}
+
 	head = inet_ehash_bucket(hashinfo, sk->sk_hash);
 	list = &head->chain;
 	lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
@@ -594,9 +742,16 @@ void inet_unhash(struct sock *sk)
 
 			__get_cpu_var(hash_stats).local_listen_unhash++;
 		}
+	} else {
+		if (sock_flag(sk, SOCK_PERCPU)) { 
+			struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, smp_processor_id());
+
+			//lock = &iet->ehash_lock;
+			lock = inet_local_ehash_lockp(iet, sk->sk_hash);
+		} else {
+			lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
+		}
 	}
-	else
-		lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
 
 	spin_lock_bh(lock);
 	done =__sk_nulls_del_node_init_rcu(sk);
@@ -873,11 +1028,10 @@ static void hash_seq_stop(struct seq_file *seq, void *v)
 
 static void *hash_seq_start(struct seq_file *seq, loff_t *pos)
 {
-	seq_printf(seq, "%s\t%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s\n",
+	seq_printf(seq, "%s\t%-15s%-15s%-15s%-15s%-15s%-15s%-15s\n",
 		"CPU", "Loc_lst_lookup", "Glo_lst_lookup", 
-		"Com_accetp", "Com_accept_F", "Loc_accept", 
-		"Loc_accept_F", "Loc_accept_A", "Glo_accept", 
-		"Glo_accept_F", "Glo_accept_A");
+		"Loc_est_lookup", "Glo_est_lookup",
+		"Com_accetp", "Loc_accept", "Glo_accept");
 		
 	cpu_id = 0;
 
@@ -888,11 +1042,10 @@ static int hash_seq_show(struct seq_file *seq, void *v)
 {
 	struct inet_hash_stats *s = v;
 
-	seq_printf(seq, "%u\t%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu\n", 
-		cpu_id, s->local_listen_lookup, s->global_listen_lookup, 
-		s->common_accept, s->common_accept_failed, s->local_accept, 
-		s->local_accept_failed, s->local_accept_again, s->global_accept, 
-		s->global_accept_failed, s->global_accept_again);
+	seq_printf(seq, "%u\t%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu\n", 
+		cpu_id, s->local_listen_lookup, s->global_listen_lookup,
+		s->local_established_lookup, s->global_established_lookup,
+		s->common_accept, s->local_accept, s->global_accept);
 
 	return 0;
 }

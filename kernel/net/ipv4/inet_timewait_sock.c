@@ -79,9 +79,12 @@ void __inet_twsk_hashdance(struct inet_timewait_sock *tw, struct sock *sk,
 {
 	const struct inet_sock *inet = inet_sk(sk);
 	const struct inet_connection_sock *icsk = inet_csk(sk);
-	struct inet_ehash_bucket *ehead = inet_ehash_bucket(hashinfo, sk->sk_hash);
-	spinlock_t *lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
+	//struct inet_ehash_bucket *ehead = inet_ehash_bucket(hashinfo, sk->sk_hash);
+	//spinlock_t *lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
+	struct inet_ehash_bucket *ehead;
+	spinlock_t *lock;
 	struct inet_bind_hashbucket *bhead;
+
 	/* Step 1: Put TW into bind hash. Original socket stays there too.
 	   Note, that any socket with inet->num != 0 MUST be bound in
 	   binding cache, even if it is closed.
@@ -93,6 +96,16 @@ void __inet_twsk_hashdance(struct inet_timewait_sock *tw, struct sock *sk,
 	WARN_ON(!icsk->icsk_bind_hash);
 	inet_twsk_add_bind_node(tw, &tw->tw_tb->owners);
 	spin_unlock(&bhead->lock);
+
+	if (sock_flag(sk, SOCK_PERCPU)) {
+		struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, smp_processor_id());
+
+		ehead = inet_local_ehash_bucket(iet, sk->sk_hash);
+		lock = inet_local_ehash_lockp(iet, sk->sk_hash);
+	} else {
+		ehead = inet_ehash_bucket(hashinfo, sk->sk_hash);
+		lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
+	}
 
 	spin_lock(lock);
 
