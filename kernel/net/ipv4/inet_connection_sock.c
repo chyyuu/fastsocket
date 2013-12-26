@@ -61,7 +61,7 @@ int inet_csk_bind_conflict(const struct sock *sk,
 	int reuse = sk->sk_reuse;
 
 	//FIXME: Is it check enough?
-	if (sk->sk_cpumask)
+	if (sock_flag((struct sock *)sk, SOCK_PERCPU))
 		return 0;
 
 	/*

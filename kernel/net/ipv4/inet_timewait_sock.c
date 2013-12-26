@@ -21,7 +21,15 @@ static void __inet_twsk_kill(struct inet_timewait_sock *tw,
 	struct inet_bind_hashbucket *bhead;
 	struct inet_bind_bucket *tb;
 	/* Unlink from established hashes. */
-	spinlock_t *lock = inet_ehash_lockp(hashinfo, tw->tw_hash);
+	//spinlock_t *lock = inet_ehash_lockp(hashinfo, tw->tw_hash);
+	spinlock_t *lock;
+
+	if (twsk_flag(tw, SOCK_PERCPU)) {
+		struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, tw->tw_cpumask);
+
+		lock = inet_local_ehash_lockp(iet, tw->tw_hash);
+	} else
+		lock = inet_ehash_lockp(hashinfo, tw->tw_hash);
 
 	spin_lock(lock);
 	if (hlist_nulls_unhashed(&tw->tw_node)) {
@@ -97,8 +105,8 @@ void __inet_twsk_hashdance(struct inet_timewait_sock *tw, struct sock *sk,
 	inet_twsk_add_bind_node(tw, &tw->tw_tb->owners);
 	spin_unlock(&bhead->lock);
 
-	if (sock_flag(sk, SOCK_PERCPU)) {
-		struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, smp_processor_id());
+	if (twsk_flag(tw, SOCK_PERCPU)) {
+		struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, tw->tw_cpumask);
 
 		ehead = inet_local_ehash_bucket(iet, sk->sk_hash);
 		lock = inet_local_ehash_lockp(iet, sk->sk_hash);
@@ -150,6 +158,8 @@ struct inet_timewait_sock *inet_twsk_alloc(const struct sock *sk, const int stat
 		tw->tw_hash	    = sk->sk_hash;
 		tw->tw_ipv6only	    = 0;
 		tw->tw_transparent  = inet->transparent;
+		tw->tw_flags        = sk->sk_flags;
+		tw->tw_cpumask      = sk->sk_cpumask;
 		tw->tw_prot	    = sk->sk_prot_creator;
 		twsk_net_set(tw, hold_net(sock_net(sk)));
 		atomic_set(&tw->tw_refcnt, 1);

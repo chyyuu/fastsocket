@@ -31,7 +31,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.1.3");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
@@ -71,6 +71,7 @@ static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
 extern int inet_create(struct net *net, struct socket *sock, int protocol, int kern);
 
 static inline int fsocket_filp_close(struct file *file);
+static void fsocket_sk_affinity_set(struct socket *sock, int cpu);
 
 static inline void fsock_release_sock(struct socket *sock)
 {
@@ -351,7 +352,7 @@ static inline int fsocket_filp_close(struct file *file)
 		__fsocket_filp_close(sfile);
 	}
 
-	//Close old file when we don't need the socket fd, so it's safe to install the ofile back when spawn failed
+	/* Close old file when we don't need the socket fd, so it's safe to install the ofile back when spawn failed */
 	if (ofile && !retval) {
 		DPRINTK(DEBUG, "Close old file 0x%p\n", ofile);
 		__fsocket_filp_close(ofile);
@@ -640,9 +641,10 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		goto out;
 	}
 
-	sock->sk->sk_cpumask = 0;
-
 	fsocket_copy_socket(oldsock, sock);
+
+	/* Set SOCK_PERCPU after sopy_socket which otherwise resets SOCK_PERCPU */
+	sock_set_flag(sock->sk, SOCK_PERCPU);
 
 	path.dentry = fsock_d_alloc(sock, NULL, &name);
 	if (unlikely(!path.dentry)) {
@@ -757,6 +759,7 @@ static int fsocket_socket(int flags)
 	}
 
 	sock_set_flag(sock->sk, SOCK_PERCPU);
+	fsocket_sk_affinity_set(sock, smp_processor_id());
 
 	err = fsock_map_fd(sock, flags);
 	if (err < 0) {
@@ -877,7 +880,7 @@ static int fsocket_process_affinity_check(void)
 	int ccpu, ncpu, cpu;
 	int tcpu = -1;
 	struct cpumask omask;
-	struct socket *sock;
+	//struct socket *sock;
 	
 	if (enable_percpu_listen == DISABLE_LISTEN_SPAWN) {
 		EPRINTK_LIMIT(ERR, "Module para disable listen-spawn feature\n");
@@ -887,12 +890,6 @@ static int fsocket_process_affinity_check(void)
 	sched_getaffinity(current->pid, &omask);
 	ccpu = cpumask_first(&omask);
 	ncpu = cpumask_next(ccpu, &omask);
-
-	if (ccpu > (sizeof(sock->sk->sk_cpumask) << 3))
-	{
-		EPRINTK_LIMIT(ERR, "CPU number exceeds size of cpumask\n");
-		return -EINVAL;
-	}
 
 	if (ccpu >= nr_cpumask_bits) {
 		DPRINTK(DEBUG, "Current process affinity is messed up\n");
@@ -932,14 +929,15 @@ static int fsocket_process_affinity_check(void)
 
 static void fsocket_sk_affinity_set(struct socket *sock, int cpu)
 {
-	sock->sk->sk_cpumask = (unsigned long)1 << cpu;
+	sock->sk->sk_cpumask = cpu;
 
-	DPRINTK(DEBUG, "Bind this listen socket to CPU %d with bitmap 0x%02lx\n", cpu, sock->sk->sk_cpumask);
+	DPRINTK(DEBUG, "Bind this socket to CPU %d\n", sock->sk->sk_cpumask);
 }
 
+//FIXME: Is this sk_cpumask reset necessary
 static void fsocket_sk_affinity_release(struct socket *sock)
 {
-	sock->sk->sk_cpumask = 0;
+	sock->sk->sk_cpumask = NOCPU;
 }
 
 static void fsocket_filp_close_spawn(int fd)
@@ -1170,7 +1168,7 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		int __user *upeer_addrlen, int flags)
 {
 	int err = 0, newfd, len;
-	struct socket *sock, *newsock, *lsock;
+	struct socket *sock, *newsock, *lsock = NULL;
 	struct sockaddr_storage address;
 	struct file *newfile;
 	struct inet_connection_sock *icsk;
@@ -1234,13 +1232,18 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		}
 	}
 
-	sock_set_flag(sock->sk, SOCK_PERCPU);
-
 	if (err < 0) {
 		if (err != -EAGAIN)
 			EPRINTK_LIMIT(ERR, "Accept failed [%d]\n", err);
 		goto out_fd;
+	
 	}
+
+	/* Percpu established table only works with percpu listen table */
+	/* PERCPU and cpumask is already set in syn_recv_sock which copy both from listen socket */
+
+	//if (lsock)
+	//	fsocket_sk_affinity_set(newsock, lsock->sk->sk_cpumask);
 
 	if (upeer_sockaddr) {
 		if (newsock->ops->getname(newsock, (struct sockaddr *)&address, &len, 2) < 0) {
@@ -1299,6 +1302,8 @@ int fastsocket_accept(struct fsocket_ioctl_arg *u_arg)
 	return ret;
 }
 
+//static int fsocket_listen(int fd, int backlog)
+
 static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
 {
 	struct fsocket_ioctl_arg arg;
@@ -1320,11 +1325,20 @@ static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
 	}
 	
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
+		struct socket *lsock = tfile->private_data;
+
 		DPRINTK(DEBUG,"Listen fastsocket %d\n", fd);
 		if (enable_fast_epoll) {
 			/* For listen fastsocket, set single-wakeup and reset bind-epi */
 			tfile->f_mode |= FMODE_SINGLE_WAKEUP;
 			tfile->f_mode &= ~FMODE_BIND_EPI;
+		}
+		
+		/*  Reset socket affinity settings for listen socket */
+		if (lsock && lsock->sk) {
+			sock_reset_flag(lsock->sk, SOCK_PERCPU);
+			/* sk_cpumask is only valid when SOCK_PERCPU is set */ 
+			lsock->sk->sk_cpumask = NOCPU;
 		}
 
 	} else {

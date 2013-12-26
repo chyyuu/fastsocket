@@ -29,6 +29,8 @@
 #define INFO 0x03
 #define DEBUG 0x04
 
+#define NOCPU	(-1)
+
 extern int fsocket_get_dbg_level(void);
 
 DEFINE_RATELIMIT_STATE(fastsocket_ratelimit_state, 5 * HZ, 10);

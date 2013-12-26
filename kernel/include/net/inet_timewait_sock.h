@@ -136,9 +136,21 @@ struct inet_timewait_sock {
 				tw_ipv6_offset  : 16;
 	kmemcheck_bitfield_end(flags);
 	unsigned long		tw_ttd;
+	unsigned long 		tw_flags;
+	int			tw_cpumask;
 	struct inet_bind_bucket	*tw_tb;
 	struct hlist_node	tw_death_node;
 };
+
+static inline int twsk_flag(struct inet_timewait_sock *tw, enum sock_flags flag)
+{
+		return test_bit(flag, &tw->tw_flags);
+}
+
+static inline void twsk_set_flag(struct inet_timewait_sock *tw, enum sock_flags flag)
+{
+		__set_bit(flag, &tw->tw_flags);
+}
 
 static inline void inet_twsk_add_node_rcu(struct inet_timewait_sock *tw,
 				      struct hlist_nulls_head *list)

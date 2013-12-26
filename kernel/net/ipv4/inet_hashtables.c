@@ -172,10 +172,10 @@ static inline int compute_score(struct sock *sk, struct net *net,
 			score += 2;
 		}
 
-		if (sk->sk_cpumask == 0)
+		if (sk->sk_cpumask < 0)
 			score++;
 
-		if (sk->sk_cpumask & ((unsigned long)1 << processor_id))
+		if (sk->sk_cpumask == processor_id)
 			score += 2;
 	}
 	return score;
@@ -496,12 +496,8 @@ struct sock *__inet_lookup_local(struct net *net,
 					 const int dif)
 {
 	u16 hnum = ntohs(dport);
-
 	struct sock *sk = __inet_lookup_local_established(net, hashinfo,
 				saddr, sport, daddr, hnum, dif);
-
-	//if (!sk)
-	//	printk(KERN_INFO "Local ehash table miss for port %d\n", hnum);
 
 	return sk ? : __inet_lookup_local_listener(net, hashinfo, daddr, hnum, dif);
 }
@@ -515,12 +511,8 @@ struct sock *__inet_lookup_global(struct net *net,
 					 const int dif)
 {
 	u16 hnum = ntohs(dport);
-
 	struct sock *sk = __inet_lookup_established(net, hashinfo,
 				saddr, sport, daddr, hnum, dif);
-
-	//if (!sk)
-	//	printk(KERN_INFO "Global ehash table miss for port %d\n", hnum);
 
 	return sk ? : __inet_lookup_listener(net, hashinfo, daddr, hnum, dif);
 }
@@ -616,11 +608,10 @@ void __inet_hash_local_nolisten(struct sock *sk)
 	spinlock_t *lock;
 	struct inet_ehash_bucket *head;
 
-	struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, smp_processor_id());
+	struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, sk->sk_cpumask);
 
 	head = inet_local_ehash_bucket(iet, sk->sk_hash);
 	list = &head->chain;
-	//lock = &iet->ehash_lock;
 	lock = inet_local_ehash_lockp(iet, sk->sk_hash);
 
 	spin_lock(lock);
@@ -671,7 +662,7 @@ static void __inet_hash(struct sock *sk)
 
 	hash = inet_sk_listen_hashfn(sk);
 
-	if (!sk->sk_cpumask) {
+	if (!sock_flag(sk, SOCK_PERCPU)) {
 		ilb = &hashinfo->listening_hash[hash];
 
 		spin_lock(&ilb->lock);
@@ -682,14 +673,8 @@ static void __inet_hash(struct sock *sk)
 		__get_cpu_var(hash_stats).global_listen_hash++;
 	} else {
 		struct inet_listen_hashtable *ilt;
-		int cpu;
 
-		for_each_possible_cpu(cpu) {
-			if (sk->sk_cpumask & ((unsigned long)1 << cpu))
-				break;
-		}
-		
-		ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);	
+		ilt = per_cpu_ptr(hashinfo->local_listening_hash, sk->sk_cpumask);	
 		ilb = &ilt->listening_hash[hash];
 		
 		spin_lock(&ilb->lock);
@@ -722,34 +707,25 @@ void inet_unhash(struct sock *sk)
 
 	if (sk->sk_state == TCP_LISTEN) {
 		int hash = inet_sk_listen_hashfn(sk);
-		if (!sk->sk_cpumask) {
+		if (!sock_flag(sk, SOCK_PERCPU)) {
 			lock = &hashinfo->listening_hash[hash].lock;
-
 			__get_cpu_var(hash_stats).global_listen_unhash++;
 		} else {
 			struct inet_listen_hashbucket *ilb;
 			struct inet_listen_hashtable *ilt;
-			int cpu;
 
-			for_each_possible_cpu(cpu) {
-				if (sk->sk_cpumask & ((unsigned long)1 << cpu))
-					break;
-			}
-			ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);
+			ilt = per_cpu_ptr(hashinfo->local_listening_hash, sk->sk_cpumask);
 			ilb = &ilt->listening_hash[hash];
 
 			lock = &ilb->lock;
-
 			__get_cpu_var(hash_stats).local_listen_unhash++;
 		}
 	} else {
-		if (sock_flag(sk, SOCK_PERCPU)) { 
-			struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, smp_processor_id());
-
-			//lock = &iet->ehash_lock;
-			lock = inet_local_ehash_lockp(iet, sk->sk_hash);
-		} else {
+		if (!sock_flag(sk, SOCK_PERCPU))
 			lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
+		else {
+			struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, sk->sk_cpumask);
+			lock = inet_local_ehash_lockp(iet, sk->sk_hash);
 		}
 	}
 
