@@ -554,7 +554,8 @@ enum sock_flags {
 	SOCK_TIMESTAMPING_SYS_HARDWARE, /* %SOF_TIMESTAMPING_SYS_HARDWARE */
 	SOCK_RXQ_OVFL,
 	SOCK_ZEROCOPY, /* buffers from userspace */
-	SOCK_PERCPU,
+	SOCK_LPERCPU,  /* Mark percpu listen socket */
+	SOCK_EPERCPU,  /* Mark percpu established socket */
 };
 
 static inline void sock_copy_flags(struct sock *nsk, struct sock *osk)

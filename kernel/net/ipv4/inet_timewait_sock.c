@@ -24,7 +24,7 @@ static void __inet_twsk_kill(struct inet_timewait_sock *tw,
 	//spinlock_t *lock = inet_ehash_lockp(hashinfo, tw->tw_hash);
 	spinlock_t *lock;
 
-	if (twsk_flag(tw, SOCK_PERCPU)) {
+	if (twsk_flag(tw, SOCK_EPERCPU)) {
 		struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, tw->tw_cpumask);
 
 		lock = inet_local_ehash_lockp(iet, tw->tw_hash);
@@ -105,7 +105,7 @@ void __inet_twsk_hashdance(struct inet_timewait_sock *tw, struct sock *sk,
 	inet_twsk_add_bind_node(tw, &tw->tw_tb->owners);
 	spin_unlock(&bhead->lock);
 
-	if (twsk_flag(tw, SOCK_PERCPU)) {
+	if (twsk_flag(tw, SOCK_EPERCPU)) {
 		struct inet_established_hashtable *iet = per_cpu_ptr(hashinfo->local_established_hash, tw->tw_cpumask);
 
 		ehead = inet_local_ehash_bucket(iet, sk->sk_hash);

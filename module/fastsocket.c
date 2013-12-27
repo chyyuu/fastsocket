@@ -31,23 +31,24 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.1.3");
+MODULE_VERSION("1.0.1.6");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
 static int enable_percpu_listen = 2;
-//static int enable_percpu_established = 0;
+static int enable_percpu_established = 0;
 extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_percpu_listen, int, 0);
+module_param(enable_percpu_established, int, 0);
 module_param(enable_receive_flow_deliver, int, 0);
 module_param(enable_fast_epoll, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
-MODULE_PARM_DESC(enable_percpu_listen, " Control Percpu Listen Table: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
-MODULE_PARM_DESC(enable_percpu_established, " Control Percpu Establihsed Table: 0 = Disbale[Default], 1 = Enabled");
+MODULE_PARM_DESC(enable_percpu_listen, " Control Percpu-Listen-Table: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
+MODULE_PARM_DESC(enable_percpu_established, " Control Percpu-Establihsed-Table: 0 = Disbale[Default], 1 = Enabled[Depends on Receive-Flow-Deliver and Percpu-Listen-Table]");
 MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disbale, 1 = Enabled[Default]");
 
@@ -643,8 +644,10 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 
 	fsocket_copy_socket(oldsock, sock);
 
+	sock_set_flag(sock->sk, SOCK_LPERCPU);
 	/* Set SOCK_PERCPU after sopy_socket which otherwise resets SOCK_PERCPU */
-	sock_set_flag(sock->sk, SOCK_PERCPU);
+	if (enable_percpu_established)
+		sock_set_flag(sock->sk, SOCK_EPERCPU);
 
 	path.dentry = fsock_d_alloc(sock, NULL, &name);
 	if (unlikely(!path.dentry)) {
@@ -734,7 +737,6 @@ out:
 static int fsocket_socket(int flags)
 {
 	struct socket *sock;
-
 	int err = 0;
 
 	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK)) {
@@ -757,9 +759,16 @@ static int fsocket_socket(int flags)
 		EPRINTK_LIMIT(ERR, "Initialize Inet Socket failed\n");
 		goto free_sock;
 	}
-
-	sock_set_flag(sock->sk, SOCK_PERCPU);
-	fsocket_sk_affinity_set(sock, smp_processor_id());
+	
+	//if (enable_percpu_listen) {
+	//	sock_set_flag(sock->sk, SOCK_LPERCPU);
+	//	fsocket_sk_affinity_set(sock, smp_processor_id());
+	//}
+	if (enable_percpu_established) {
+		/* sk_affinity is already set since SOCK_EPERCPU depends on SOCK_LPERCPU */
+		sock_set_flag(sock->sk, SOCK_EPERCPU);
+		fsocket_sk_affinity_set(sock, smp_processor_id());
+	}
 
 	err = fsock_map_fd(sock, flags);
 	if (err < 0) {
@@ -1110,12 +1119,12 @@ static inline int fsocket_common_accept(struct socket *sock, struct socket *news
 	ret =  sock->ops->accept(sock, newsock, flags);
 	if (!ret)
 		__get_cpu_var(hash_stats).common_accept++;
-	else {
-		if (ret != -EAGAIN)
-			__get_cpu_var(hash_stats).common_accept_failed++;
-		else
-			__get_cpu_var(hash_stats).common_accept_again++;
-	}
+	//else {
+	//	if (ret != -EAGAIN)
+	//		__get_cpu_var(hash_stats).common_accept_failed++;
+	//	else
+	//		__get_cpu_var(hash_stats).common_accept_again++;
+	//}
 	return ret;
 }
 
@@ -1124,21 +1133,24 @@ static inline int fsocket_local_accept(struct socket *sock, struct socket *newso
 	int ret;
 
 	ret = sock->ops->accept(sock, newsock, flags);
-	if (!ret)
-		__get_cpu_var(hash_stats).local_accept++;
-	else {
-		if (unlikely(ret != -EAGAIN))
-			__get_cpu_var(hash_stats).local_accept_failed++;
+	if (!ret) {
+		if (sock->sk->sk_cpumask == smp_processor_id())
+			__get_cpu_var(hash_stats).local_accept++;
 		else
-			__get_cpu_var(hash_stats).local_accept_again++;
+			__get_cpu_var(hash_stats).remote_accept++;
 	}
+	//else {
+	//	if (unlikely(ret != -EAGAIN))
+	//		__get_cpu_var(hash_stats).local_accept_failed++;
+	//	else
+	//		__get_cpu_var(hash_stats).local_accept_again++;
+	//}
 	return ret;
 }
 
 static inline int fsocket_need_global_accept(void)
 {
 	return percpu_read(global_spawn_accept) & 0x1;
-	//return __get_cpu_var(hash_stats).global_accept & 0x1;
 }
 
 static inline int fsocket_global_accept(struct socket *sock, struct socket *newsock, int flags)
@@ -1152,12 +1164,12 @@ static inline int fsocket_global_accept(struct socket *sock, struct socket *news
 		ret = sock->ops->accept(sock, newsock, flags);
 		if (!ret)
 			__get_cpu_var(hash_stats).global_accept++;
-		else {
-			if (ret != -EAGAIN)
-				__get_cpu_var(hash_stats).global_accept_failed++;
-			else
-				__get_cpu_var(hash_stats).global_accept_again++;
-		}
+		//else {
+		//	if (ret != -EAGAIN)
+		//		__get_cpu_var(hash_stats).global_accept_failed++;
+		//	else
+		//		__get_cpu_var(hash_stats).global_accept_again++;
+		//}
 		return ret;
 	}
 	return -EAGAIN;
@@ -1328,9 +1340,10 @@ static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
 			tfile->f_mode &= ~FMODE_BIND_EPI;
 		}
 		
-		/*  Reset socket affinity settings for listen socket */
+		//FIXME:  Reset socket affinity settings for listen socket, just for the moment
 		if (lsock && lsock->sk) {
-			sock_reset_flag(lsock->sk, SOCK_PERCPU);
+			sock_reset_flag(lsock->sk, SOCK_LPERCPU);
+			sock_reset_flag(lsock->sk, SOCK_EPERCPU);
 			/* sk_cpumask is only valid when SOCK_PERCPU is set */ 
 			lsock->sk->sk_cpumask = NOCPU;
 		}
@@ -1526,13 +1539,33 @@ static void init_once(void *foo)
 	inode_init_once(&ei->vfs_inode);
 }
 
-static int __init  fastsocket_init(void)
+static int fastsocket_check_param(void)
+{
+	if (enable_percpu_established) {
+		if (!enable_percpu_listen) {
+			printk(KERN_INFO "Percpu-Established-Table depends on Percpu-Listen-Table\n");
+			return -EINVAL;
+		}
+		if (!enable_receive_flow_deliver) {
+			printk(KERN_INFO "Percpu-Established-Table depends on Receive-Flow-Deliver\n");
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+static int __init fastsocket_init(void)
 {
 	int ret = 0;
 
 	DPRINTK(INFO, "CPU number: online %d possible %d present %d active %d\n",
 			num_online_cpus(), num_possible_cpus(),
 			num_present_cpus(), num_active_cpus());
+
+	ret = fastsocket_check_param();
+	if (ret < 0)
+		return ret;
 
 	ret = misc_register(&fastsocket_dev);
 	if (ret < 0) {
@@ -1565,9 +1598,11 @@ static int __init  fastsocket_init(void)
 	printk(KERN_INFO "Fastsocket: Load Module\n");
 
 	if (enable_percpu_listen)
-		printk(KERN_INFO "Fastsocket: Enable Listen Spawn[Mode-%d]\n", enable_percpu_listen);
+		printk(KERN_INFO "Fastsocket: Enable Percpu Listen Table[Mode-%d]\n", enable_percpu_listen);
 	if (enable_receive_flow_deliver)
 		printk(KERN_INFO "Fastsocket: Enable Recieve Flow Deliver\n");
+	if (enable_percpu_established)
+		printk(KERN_INFO "Fastsocket: Enable Percpu Established Table\n");
 	if (enable_fast_epoll)
 		printk(KERN_INFO "Fastsocket: Enable Fast Epoll\n");
 

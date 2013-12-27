@@ -41,23 +41,24 @@ struct inet_hash_stats
 {
 	unsigned long	common_accept;
 	unsigned long	local_accept;
+	unsigned long	remote_accept;
 	unsigned long	global_accept;
-	unsigned long	common_accept_failed;
-	unsigned long	local_accept_failed;
-	unsigned long	global_accept_failed;
-	unsigned long	common_accept_again;
-	unsigned long	local_accept_again;
-	unsigned long	global_accept_again;
+	//unsigned long	common_accept_failed;
+	//unsigned long	local_accept_failed;
+	//unsigned long	global_accept_failed;
+	//unsigned long	common_accept_again;
+	//unsigned long	local_accept_again;
+	//unsigned long	global_accept_again;
 
 	unsigned long	local_listen_lookup;
 	unsigned long 	global_listen_lookup;
 	unsigned long	local_established_lookup;
 	unsigned long 	global_established_lookup;
 
-	unsigned 	local_listen_hash;
-	unsigned	local_listen_unhash;
-	unsigned 	global_listen_hash;
-	unsigned	global_listen_unhash;
+	//unsigned 	local_listen_hash;
+	//unsigned	local_listen_unhash;
+	//unsigned 	global_listen_hash;
+	//unsigned	global_listen_unhash;
 };
 
 /* This is for all connections with a full identity, no wildcards.
@@ -424,17 +425,17 @@ static inline struct sock *
 					 ntohs(dport), dif);
 }
 
-extern struct sock *__inet_lookup_local(struct net *net,
-					 struct inet_hashinfo *hashinfo,
-					 const __be32 saddr, const __be16 sport,
-					 const __be32 daddr, const __be16 dport,
-					 const int dif);
-
-extern struct sock *__inet_lookup_global(struct net *net,
-					 struct inet_hashinfo *hashinfo,
-					 const __be32 saddr, const __be16 sport,
-					 const __be32 daddr, const __be16 dport,
-					 const int dif);
+//extern struct sock *__inet_lookup_local(struct net *net,
+//					 struct inet_hashinfo *hashinfo,
+//					 const __be32 saddr, const __be16 sport,
+//					 const __be32 daddr, const __be16 dport,
+//					 const int dif);
+//
+//extern struct sock *__inet_lookup_global(struct net *net,
+//					 struct inet_hashinfo *hashinfo,
+//					 const __be32 saddr, const __be16 sport,
+//					 const __be32 daddr, const __be16 dport,
+//					 const int dif);
 
 static inline struct sock *__inet_lookup(struct net *net,
 					 struct inet_hashinfo *hashinfo,
@@ -442,10 +443,9 @@ static inline struct sock *__inet_lookup(struct net *net,
 					 const __be32 daddr, const __be16 dport,
 					 const int dif)
 {
-	struct sock *sk = __inet_lookup_local(net, hashinfo,
+	struct sock *sk = inet_lookup_established(net, hashinfo,
 				saddr, sport, daddr, dport, dif);
-	return sk ? : __inet_lookup_global(net, hashinfo, 
-				saddr, sport, daddr, dport, dif);
+	return sk ? : inet_lookup_listener(net, hashinfo, daddr, dport, dif);
 }
 
 static inline struct sock *inet_lookup(struct net *net,
