@@ -1148,7 +1148,6 @@ static inline int fsocket_global_accept(struct socket *sock, struct socket *news
 	percpu_add(global_spawn_accept, 1);
 
 	//FIXME: Is the policy good?
-	//if (percpu_read(global_spawn_accept) & 0x1) {
 	if (fsocket_need_global_accept()) {
 		ret = sock->ops->accept(sock, newsock, flags);
 		if (!ret)
@@ -1242,9 +1241,6 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 	/* Percpu established table only works with percpu listen table */
 	/* PERCPU and cpumask is already set in syn_recv_sock which copy both from listen socket */
 
-	//if (lsock)
-	//	fsocket_sk_affinity_set(newsock, lsock->sk->sk_cpumask);
-
 	if (upeer_sockaddr) {
 		if (newsock->ops->getname(newsock, (struct sockaddr *)&address, &len, 2) < 0) {
 			EPRINTK_LIMIT(ERR, "Getname failed for accepted socket\n");
@@ -1301,8 +1297,6 @@ int fastsocket_accept(struct fsocket_ioctl_arg *u_arg)
 
 	return ret;
 }
-
-//static int fsocket_listen(int fd, int backlog)
 
 static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
 {
