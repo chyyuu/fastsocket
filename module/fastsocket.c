@@ -31,8 +31,8 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.1.6");
-MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
+MODULE_VERSION("1.0.1.7");
+MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application.(Support Sendpage)");
 
 static int enable_fastsocket_debug = 3;
 static int enable_percpu_listen = 2;
@@ -198,11 +198,13 @@ static inline long fast_sock_ioctl(struct file *file, unsigned cmd, unsigned lon
 	return -EINVAL;
 }
 
+#ifdef CONFIG_COMPAT
 static inline long fast_compate_sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 {
 	DPRINTK(INFO, "Do!\n");
 	return -EINVAL;
 }
+#endif
 
 static inline int fast_sock_mmap(struct file *file, struct vm_area_struct *vma)
 {
@@ -216,11 +218,16 @@ static inline int fast_sock_fasync(int fd, struct file *filp, int on)
 	return -EINVAL;
 }
 
+extern ssize_t sock_sendpage(struct file *file, struct page *page, 
+		int offset, size_t size, loff_t *ppos, int more);
+
 static inline ssize_t fast_sock_sendpage(struct file *file, struct page *page, 
 		int offset, size_t size, loff_t *ppos, int more)
 {
-	DPRINTK(INFO, "Do!\n");
-	return -EINVAL;
+	ssize_t ret;
+	ret = sock_sendpage(file, page, offset, size, ppos, more);
+	DPRINTK(DEBUG, "Send page %ld\n", ret);
+	return ret;
 }
 
 extern ssize_t generic_splice_sendpage(struct pipe_inode_info *pipe, 
