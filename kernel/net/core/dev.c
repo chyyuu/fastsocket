@@ -2859,6 +2859,7 @@ static int netif_deliver_cpu(unsigned short dport)
 		return -1;
 	}
 	if (new_cpu == cur_cpu) {
+		__get_cpu_var(deliver_stats).steer_save++;
 		return -1;
 	}
 
