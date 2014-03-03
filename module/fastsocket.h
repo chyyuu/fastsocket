@@ -57,6 +57,12 @@ struct fsocket_alloc {
 	struct inode vfs_inode;
 };
 
+
+//struct skb_pool {
+//	struct sk_buff_head free_list;
+//	struct sk_buff_head recyc_list;
+//};
+
 static inline struct inode *SOCKET_INODE(struct socket *socket)
 {
 	return &container_of(socket, struct fsocket_alloc, socket)->vfs_inode;

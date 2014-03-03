@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <linux/eventpoll.h>
+#include <fcntl.h>
 
 #define __USE_GNU
 #include <sched.h>

@@ -225,6 +225,11 @@ struct skb_shared_info {
 	void *		destructor_arg;
 };
 
+struct skb_pool {
+	struct sk_buff_head free_list;
+	struct sk_buff_head recyc_list;
+};
+
 /* We divide dataref into two halves.  The higher 16 bits hold references
  * to the payload part of skb->data.  The lower 16 bits hold references to
  * the entire skb->data.  A clone of a headerless skb holds the length of
@@ -429,8 +434,13 @@ struct sk_buff {
 	unsigned char		*head,
 				*data;
 	unsigned int		truesize;
+	unsigned int		pool_id;
 	atomic_t		users;
 };
+
+#define MAX_FASTSOCKET_SKB_RAW_SIZE     ( 2048 )
+#define MAX_FASTSOCKET_SKB_DATA_SIZE    ( 2048 - sizeof(struct skb_shared_info) )
+#define MAX_FASTSOCKET_POOL_SKB_NUM     ( 10 )
 
 #ifdef __KERNEL__
 /*

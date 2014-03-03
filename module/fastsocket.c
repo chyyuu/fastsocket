@@ -38,16 +38,19 @@ static int enable_fastsocket_debug = 3;
 static int enable_listen_spawn = 2;
 extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
+extern int enable_skb_pool;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);
 module_param(enable_receive_flow_deliver, int, 0);
 module_param(enable_fast_epoll, int, 0);
+module_param(enable_skb_pool, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
 MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
 MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disbale, 1 = Enabled[Default]");
+MODULE_PARM_DESC(enable_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Enabled[Default]");
 
 int inline fsocket_get_dbg_level(void)
 {
@@ -1519,6 +1522,62 @@ static void init_once(void *foo)
 	inode_init_once(&ei->vfs_inode);
 }
 
+static struct kmem_cache *skb_head __read_mostly;
+extern struct skb_pool __percpu *skb_pools;
+
+//#define MAX_FASTSOCKET_SKB_RAW_SIZE	( 2048 )
+//#define MAX_FASTSOCKET_SKB_DATA_SIZE	( 2048 - sizeof(struct skb_shared_info) )
+//#define MAX_FASTSOCKET_POOL_SKB_NUM	( 10 )
+
+static int fastsocket_skb_init(void)
+{	
+	int cpu, ret = 0;
+
+	printk(KERN_INFO "Size: head-%ld, sinfo-%ld\n", sizeof(struct sk_buff), sizeof(struct skb_shared_info));
+
+	if (!enable_skb_pool)
+		return ret;
+
+	printk(KERN_INFO "Fastsocket skb pool is enabled\n");
+
+	skb_head = kmem_cache_create("fastsocket_skb_cache", sizeof(struct sk_buff), 
+			0, 
+			SLAB_HWCACHE_ALIGN | SLAB_PANIC, 
+			NULL);
+
+	skb_pools = alloc_percpu(struct skb_pool);
+	if (!skb_pools) {
+		EPRINTK_LIMIT(ERR, "Allocate skb pool table failed\n");
+		return -ENOMEM;
+	}
+
+	for_each_online_cpu(cpu) {
+		int i;
+		struct skb_pool *skb_pool = per_cpu_ptr(skb_pools, cpu);
+		struct sk_buff *skb;
+
+		skb_queue_head_init(&skb_pool->free_list);
+		skb_queue_head_init(&skb_pool->recyc_list);
+
+		for (i = 0; i < MAX_FASTSOCKET_POOL_SKB_NUM; i++) {
+			//FIXME: GFP_FLAG may take some considieration.
+			skb = kmem_cache_alloc_node(skb_head, GFP_KERNEL, cpu_to_node(cpu));
+			if (!skb)
+				//FIXME: Need more carefull release.
+				return -ENOMEM;
+			skb->data = kmalloc_node(MAX_FASTSOCKET_SKB_RAW_SIZE, 
+					GFP_KERNEL, cpu_to_node(cpu));
+			if (!skb->data)
+				//FIXME: Need more carefull release.
+				return -ENOMEM;
+			skb->pool_id = cpu;
+			__skb_queue_head(&skb_pool->free_list, skb);
+		}
+	}
+
+	return ret;
+}
+
 static int __init  fastsocket_init(void)
 {
 	int ret = 0;
@@ -1526,6 +1585,12 @@ static int __init  fastsocket_init(void)
 	DPRINTK(INFO, "CPU number: online %d possible %d present %d active %d\n",
 			num_online_cpus(), num_possible_cpus(),
 			num_present_cpus(), num_active_cpus());
+
+	ret = fastsocket_skb_init();
+	if (ret < 0) {
+		EPRINTK_LIMIT(ERR, "Initialize fastsocket skb failded\n");
+		return ret;
+	}
 
 	ret = misc_register(&fastsocket_dev);
 	if (ret < 0) {
@@ -1563,6 +1628,8 @@ static int __init  fastsocket_init(void)
 		printk(KERN_INFO "Fastsocket: Enable Recieve Flow Deliver\n");
 	if (enable_fast_epoll)
 		printk(KERN_INFO "Fastsocket: Enable Fast Epoll\n");
+	if (enable_skb_pool)
+		printk(KERN_INFO "Fastsocket: Enable Skb Pool\n");
 
 	return ret;
 }
@@ -1581,6 +1648,10 @@ static void __exit fastsocket_exit(void)
 	if (enable_receive_flow_deliver) {
 		enable_receive_flow_deliver = 0;
 		printk(KERN_INFO "Fastsocket: Disable Recieve Flow Deliver\n");
+	}
+	if (enable_skb_pool) {
+		enable_skb_pool = 0;
+		printk(KERN_INFO "Fastsocket: Disable Skb Pool\n");
 	}
 
 

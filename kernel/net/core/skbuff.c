@@ -169,6 +169,12 @@ EXPORT_SYMBOL(skb_under_panic);
  *	Buffers may only be allocated from interrupts using a @gfp_mask of
  *	%GFP_ATOMIC.
  */
+
+int enable_skb_pool = 0;
+struct skb_pool __percpu *skb_pools;
+EXPORT_SYMBOL(enable_skb_pool);
+EXPORT_SYMBOL(skb_pools);
+
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			    int fclone, int node)
 {
@@ -177,18 +183,39 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	struct sk_buff *skb;
 	u8 *data;
 
+	size = SKB_DATA_ALIGN(size);
+
 	cache = fclone ? skbuff_fclone_cache : skbuff_head_cache;
+
+	if (!fclone && enable_skb_pool && 
+			size < MAX_FASTSOCKET_SKB_DATA_SIZE) {
+		struct skb_pool *skb_pool;
+
+		skb_pool = per_cpu_ptr(skb_pools, smp_processor_id());
+		skb = __skb_dequeue(&skb_pool->free_list);
+		if (!skb)
+			skb = skb_dequeue(&skb_pool->recyc_list);
+		if (skb) {
+			data = skb->data;
+			goto init;
+		}
+	}
 
 	/* Get the HEAD */
 	skb = kmem_cache_alloc_node(cache, gfp_mask & ~__GFP_DMA, node);
 	if (!skb)
 		goto out;
 
-	size = SKB_DATA_ALIGN(size);
+	/* Mark it's a skb from pool */
+	skb->pool_id = -1;
+
+	//size = SKB_DATA_ALIGN(size);
 	data = kmalloc_node_track_caller(size + sizeof(struct skb_shared_info),
 			gfp_mask, node);
 	if (!data)
 		goto nodata;
+
+init:
 
 	/*
 	 * Only clear those fields we need to clear, not those that we will
@@ -362,6 +389,9 @@ static void skb_release_data(struct sk_buff *skb)
 		if (skb_has_frags(skb))
 			skb_drop_fraglist(skb);
 
+		if (skb->pool_id > 0)
+			return;
+
 		kfree(skb->head);
 	}
 }
@@ -376,7 +406,15 @@ static void kfree_skbmem(struct sk_buff *skb)
 
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
-		kmem_cache_free(skbuff_head_cache, skb);
+		if (skb->pool_id) {
+			struct skb_pool *skb_pool = per_cpu_ptr(skb_pools, smp_processor_id());
+
+			if (skb->pool_id == smp_processor_id())
+				__skb_queue_head(&skb_pool->free_list, skb);
+			else
+				skb_queue_head(&skb_pool->recyc_list, skb);
+		} else 
+			kmem_cache_free(skbuff_head_cache, skb);
 		break;
 
 	case SKB_FCLONE_ORIG:
