@@ -70,6 +70,8 @@
 
 #include "kmap_skb.h"
 
+#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
+
 static struct kmem_cache *skbuff_head_cache __read_mostly;
 static struct kmem_cache *skbuff_fclone_cache __read_mostly;
 
@@ -170,8 +172,8 @@ EXPORT_SYMBOL(skb_under_panic);
  *	%GFP_ATOMIC.
  */
 
-int enable_skb_pool = 0;
-struct skb_pool __percpu *skb_pools;
+volatile int enable_skb_pool = 0;
+struct skb_pool __percpu *skb_pools = NULL;
 EXPORT_SYMBOL(enable_skb_pool);
 EXPORT_SYMBOL(skb_pools);
 
@@ -187,26 +189,37 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 
 	cache = fclone ? skbuff_fclone_cache : skbuff_head_cache;
 
-	if (!fclone && enable_skb_pool && 
+	if (in_softirq() && !fclone && enable_skb_pool && skb_pools &&
 			size < MAX_FASTSOCKET_SKB_DATA_SIZE) {
 		struct skb_pool *skb_pool;
 
 		skb_pool = per_cpu_ptr(skb_pools, smp_processor_id());
-		skb = __skb_dequeue(&skb_pool->free_list);
-		if (!skb)
+		skb = skb_dequeue(&skb_pool->free_list);
+		if (skb)
+			DPRINTK("Allocate skb[%d] 0x%p from %d free list\n", 
+					skb->pool_id, skb, smp_processor_id());
+		if (!skb) {
 			skb = skb_dequeue(&skb_pool->recyc_list);
-		if (skb) {
-			data = skb->data;
-			goto init;
+			if (skb)
+				DPRINTK("Allocate skb[%d] 0x%p from %d recycle list\n", 
+						skb->pool_id, skb, smp_processor_id());
 		}
+		if (skb) {
+			data = skb->data_cache;
+			skb->pool_id = smp_processor_id();
+			goto init;
+		} else 
+			DPRINTK("Allocate skb failed from %d pool list\n", 
+					smp_processor_id());
 	}
 
 	/* Get the HEAD */
 	skb = kmem_cache_alloc_node(cache, gfp_mask & ~__GFP_DMA, node);
 	if (!skb)
 		goto out;
+	DPRINTK("Allocate regular skb[%d] 0x%p\n", skb->pool_id, skb);
 
-	/* Mark it's a skb from pool */
+	/* Mark it is a skb from regular cache */
 	skb->pool_id = -1;
 
 	//size = SKB_DATA_ALIGN(size);
@@ -216,6 +229,8 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 		goto nodata;
 
 init:
+
+	DPRINTK("Initialize skb[%d] %p\n", skb->pool_id, skb);
 
 	/*
 	 * Only clear those fields we need to clear, not those that we will
@@ -389,7 +404,7 @@ static void skb_release_data(struct sk_buff *skb)
 		if (skb_has_frags(skb))
 			skb_drop_fraglist(skb);
 
-		if (skb->pool_id > 0)
+		if (skb->pool_id >= 0)
 			return;
 
 		kfree(skb->head);
@@ -404,17 +419,32 @@ static void kfree_skbmem(struct sk_buff *skb)
 	struct sk_buff *other;
 	atomic_t *fclone_ref;
 
+	barrier();
+
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
-		if (skb->pool_id) {
-			struct skb_pool *skb_pool = per_cpu_ptr(skb_pools, smp_processor_id());
+		if (enable_skb_pool && skb_pools && skb->pool_id >= 0) {
+			struct skb_pool *skb_pool;
+			
+			DPRINTK("Free skb[%d] 0x%p on CPU %d\n", 
+					skb->pool_id, skb, smp_processor_id())
 
-			if (skb->pool_id == smp_processor_id())
-				__skb_queue_head(&skb_pool->free_list, skb);
-			else
+		       	skb_pool = per_cpu_ptr(skb_pools, skb->pool_id);
+
+			if (skb->pool_id == smp_processor_id()) {
+				skb_queue_head(&skb_pool->free_list, skb);
+				DPRINTK("Put skb[%d] 0x%p into %d free list\n", 
+						skb->pool_id, skb, skb->pool_id);
+			}
+			else {
 				skb_queue_head(&skb_pool->recyc_list, skb);
-		} else 
+				DPRINTK("Put skb[%d] 0x%p into %d recycle list\n", 
+						skb->pool_id, skb, skb->pool_id);
+			}
+		} else {
+			DPRINTK("Free regular skb[%d] 0x%p\n", skb->pool_id, skb);
 			kmem_cache_free(skbuff_head_cache, skb);
+		}
 		break;
 
 	case SKB_FCLONE_ORIG:
@@ -498,6 +528,8 @@ void kfree_skb(struct sk_buff *skb)
 {
 	if (unlikely(!skb))
 		return;
+	DPRINTK("Try to free skb[%d] 0x%p[%d]\n", skb->pool_id, skb, atomic_read(&skb->users));
+
 	if (likely(atomic_read(&skb->users) == 1))
 		smp_rmb();
 	else if (likely(!atomic_dec_and_test(&skb->users)))

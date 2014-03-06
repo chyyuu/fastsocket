@@ -31,7 +31,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.0.SP");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
@@ -39,18 +39,19 @@ static int enable_listen_spawn = 2;
 extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
 extern int enable_skb_pool;
+static int enable_fastsocket_skb_pool;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);
 module_param(enable_receive_flow_deliver, int, 0);
 module_param(enable_fast_epoll, int, 0);
-module_param(enable_skb_pool, int, 0);
+module_param(enable_fastsocket_skb_pool, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
 MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
 MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disbale, 1 = Enabled[Default]");
-MODULE_PARM_DESC(enable_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Enabled[Default]");
+MODULE_PARM_DESC(enable_fastsocket_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Enabled[Default]");
 
 int inline fsocket_get_dbg_level(void)
 {
@@ -1535,7 +1536,7 @@ static int fastsocket_skb_init(void)
 
 	printk(KERN_INFO "Size: head-%ld, sinfo-%ld\n", sizeof(struct sk_buff), sizeof(struct skb_shared_info));
 
-	if (!enable_skb_pool)
+	if (!enable_fastsocket_skb_pool)
 		return ret;
 
 	printk(KERN_INFO "Fastsocket skb pool is enabled\n");
@@ -1565,15 +1566,19 @@ static int fastsocket_skb_init(void)
 			if (!skb)
 				//FIXME: Need more carefull release.
 				return -ENOMEM;
-			skb->data = kmalloc_node(MAX_FASTSOCKET_SKB_RAW_SIZE, 
+			skb->data_cache = kmalloc_node(MAX_FASTSOCKET_SKB_RAW_SIZE, 
 					GFP_KERNEL, cpu_to_node(cpu));
-			if (!skb->data)
+			if (!skb->data_cache)
 				//FIXME: Need more carefull release.
 				return -ENOMEM;
 			skb->pool_id = cpu;
-			__skb_queue_head(&skb_pool->free_list, skb);
+			skb_queue_head(&skb_pool->free_list, skb);
 		}
 	}
+
+	enable_skb_pool = 1;
+
+	barrier();
 
 	return ret;
 }
@@ -1628,7 +1633,7 @@ static int __init  fastsocket_init(void)
 		printk(KERN_INFO "Fastsocket: Enable Recieve Flow Deliver\n");
 	if (enable_fast_epoll)
 		printk(KERN_INFO "Fastsocket: Enable Fast Epoll\n");
-	if (enable_skb_pool)
+	if (enable_fastsocket_skb_pool)
 		printk(KERN_INFO "Fastsocket: Enable Skb Pool\n");
 
 	return ret;

@@ -432,9 +432,10 @@ struct sk_buff {
 	sk_buff_data_t		tail;
 	sk_buff_data_t		end;
 	unsigned char		*head,
-				*data;
+				*data,
+				*data_cache;
 	unsigned int		truesize;
-	unsigned int		pool_id;
+	int			pool_id;
 	atomic_t		users;
 };
 
