@@ -201,10 +201,15 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			DPRINTK("Allocate skb[%d] 0x%p from %d free list\n", 
 					skb->pool_id, skb, smp_processor_id());
 		if (!skb) {
-			skb = skb_dequeue(&skb_pool->recyc_list);
-			if (skb)
-				DPRINTK("Allocate skb[%d] 0x%p from %d recycle list\n", 
-						skb->pool_id, skb, smp_processor_id());
+			unsigned long flags;
+
+			DPRINTK("Splice %u skbs from recycle list\n", skb_pool->recyc_list.qlen);
+
+			spin_lock_irqsave(&(skb_pool->recyc_list.lock), flags);
+			skb_queue_splice_init(&skb_pool->recyc_list, &skb_pool->free_list);
+			spin_unlock_irqrestore(&(skb_pool->recyc_list.lock), flags);
+
+			skb = skb_dequeue(&skb_pool->free_list);
 		}
 		if (skb) {
 			data = skb->data_cache;
@@ -425,9 +430,8 @@ static void kfree_skbmem(struct sk_buff *skb)
 
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
-		//if (enable_skb_pool && skb_pools && skb->pool_id >= 0) {
-		if (enable_skb_pool && skb->pool_id >= 0) {
-		//if (skb->pool_id >= 0) {
+		//if (enable_skb_pool && skb->pool_id >= 0) {
+		if (skb->pool_id >= 0) {
 			struct skb_pool *skb_pool;
 			
 			DPRINTK("Free skb[%d] 0x%p on CPU %d\n", 
