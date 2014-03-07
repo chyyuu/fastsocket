@@ -74,7 +74,8 @@
 
 static struct kmem_cache *skbuff_head_cache __read_mostly;
 static struct kmem_cache *skbuff_fclone_cache __read_mostly;
-static struct kmem_cache *skbuff_fastsocket_cache __read_mostly;
+static struct kmem_cache *fastsocket_skbuff_head_cache __read_mostly;
+static struct kmem_cache *fastsocket_skbuff_fclone_cache __read_mostly;
 
 static void sock_pipe_buf_release(struct pipe_inode_info *pipe,
 				  struct pipe_buffer *buf)
@@ -174,25 +175,48 @@ EXPORT_SYMBOL(skb_under_panic);
  */
 
 int enable_skb_pool = 0;
-struct skb_pool __percpu *skb_pools = NULL;
+struct skb_pool __percpu *skb_pools, *skb_clone_pools;
 
 EXPORT_SYMBOL(enable_skb_pool);
-EXPORT_SYMBOL(skb_pools);
 
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			    int fclone, int node)
 {
-	struct kmem_cache *cache;
+	struct kmem_cache *cache = NULL;
+	struct skb_pool *pools = NULL;
 	struct skb_shared_info *shinfo;
 	struct sk_buff *skb;
+	int clone;
 	u8 *data;
 
 	size = SKB_DATA_ALIGN(size);
 
-	cache = fclone ? skbuff_fclone_cache : skbuff_head_cache;
+	//cache = fclone ? skbuff_fclone_cache : skbuff_head_cache;
 
-	if (in_softirq() && !fclone && enable_skb_pool && skb_pools &&
-			size < MAX_FASTSOCKET_SKB_DATA_SIZE) {
+	switch (fclone) {
+		case REGULAR_SKB:
+			cache = skbuff_head_cache;
+			clone = 0;
+			break;
+		case REGULAR_SKB_CLONE:
+			cache = skbuff_fclone_cache;
+			clone = 1;
+			break;
+		case POOL_SKB:
+			pools = skb_pools;
+			cache = skbuff_head_cache;
+			clone = 0;
+			break;
+		case POOL_SKB_CLONE:
+			pools = skb_clone_pools;
+			cache = skbuff_fclone_cache;
+			clone = 1;
+			break;
+		default:
+			return NULL;
+	}
+
+	if (enable_skb_pool && pools && size < MAX_FASTSOCKET_SKB_DATA_SIZE) {
 		struct skb_pool *skb_pool;
 
 		skb_pool = per_cpu_ptr(skb_pools, smp_processor_id());
@@ -225,9 +249,6 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	if (!skb)
 		goto out;
 	DPRINTK("Allocate regular skb[%d] 0x%p\n", skb->pool_id, skb);
-
-	/* Mark it is a skb from regular cache */
-	skb->pool_id = -1;
 
 	//size = SKB_DATA_ALIGN(size);
 	data = kmalloc_node_track_caller(size + sizeof(struct skb_shared_info),
@@ -269,7 +290,7 @@ init:
 	skb_frag_list_init(skb);
 	memset(&shinfo->hwtstamps, 0, sizeof(shinfo->hwtstamps));
 
-	if (fclone) {
+	if (clone) {
 		struct sk_buff *child = skb + 1;
 		atomic_t *fclone_ref = (atomic_t *) (child + 1);
 
@@ -308,7 +329,7 @@ struct sk_buff *__netdev_alloc_skb(struct net_device *dev,
 	int node = dev->dev.parent ? dev_to_node(dev->dev.parent) : -1;
 	struct sk_buff *skb;
 
-	skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, 0, node);
+	skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, POOL_SKB, node);
 	if (likely(skb)) {
 		skb_reserve(skb, NET_SKB_PAD);
 		skb->dev = dev;
@@ -426,7 +447,7 @@ static void kfree_skbmem(struct sk_buff *skb)
 	struct sk_buff *other;
 	atomic_t *fclone_ref;
 
-	barrier();
+	//barrier();
 
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
@@ -3044,39 +3065,49 @@ void __init skb_init(void)
 						SLAB_HWCACHE_ALIGN|SLAB_PANIC,
 						skb_init_pool_id_clone);
 
-	skbuff_fastsocket_cache = kmem_cache_create("skbuff_fastsocket_cache", 
+	fastsocket_skbuff_head_cache = kmem_cache_create("fastsocket_skbuff_head_cache", 
 						sizeof(struct sk_buff), 
+						0, 
+						SLAB_HWCACHE_ALIGN | SLAB_PANIC, 
+						NULL);
+	fastsocket_skbuff_fclone_cache = kmem_cache_create("fastsocket_skbuff_fclone_cache", 
+						(2*sizeof(struct sk_buff)) + 
+						sizeof(atomic_t), 
 						0, 
 						SLAB_HWCACHE_ALIGN | SLAB_PANIC, 
 						NULL);
 
 	skb_pools = alloc_percpu(struct skb_pool);
-	//if (!skb_pools) {
-	//	EPRINTK_LIMIT(ERR, "Allocate skb pool table failed\n");
-	//	return -ENOMEM;
-	//}
+	skb_clone_pools = alloc_percpu(struct skb_pool);
 
 	for_each_online_cpu(cpu) {
 		int i;
 		struct skb_pool *skb_pool = per_cpu_ptr(skb_pools, cpu);
+		struct skb_pool *skb_clone_pool = per_cpu_ptr(skb_clone_pools, cpu);
 		struct sk_buff *skb;
 
 		skb_queue_head_init(&skb_pool->free_list);
 		skb_queue_head_init(&skb_pool->recyc_list);
+		skb_queue_head_init(&skb_clone_pool->free_list);
+		skb_queue_head_init(&skb_clone_pool->recyc_list);
 
 		for (i = 0; i < MAX_FASTSOCKET_POOL_SKB_NUM; i++) {
 			//FIXME: GFP_FLAG may take some considieration.
-			skb = kmem_cache_alloc_node(skbuff_fastsocket_cache, GFP_KERNEL, cpu_to_node(cpu));
 			//FIXME: Need more carefull release.
-			//if (!skb)
-			//	return -ENOMEM;
+			skb = kmem_cache_alloc_node(fastsocket_skbuff_head_cache, GFP_KERNEL, cpu_to_node(cpu));
 			skb->data_cache = kmalloc_node(MAX_FASTSOCKET_SKB_RAW_SIZE, 
 					GFP_KERNEL, cpu_to_node(cpu));
-			//FIXME: Need more carefull release.
-			//if (!skb->data_cache)
-			//	return -ENOMEM;
 			skb->pool_id = cpu;
 			skb_queue_head(&skb_pool->free_list, skb);
+		}
+		for (i = 0; i < MAX_FASTSOCKET_POOL_SKB_NUM; i++) {
+			//FIXME: GFP_FLAG may take some considieration.
+			//FIXME: Need more carefull release.
+			skb = kmem_cache_alloc_node(fastsocket_skbuff_fclone_cache, GFP_KERNEL, cpu_to_node(cpu));
+			skb->data_cache = kmalloc_node(MAX_FASTSOCKET_SKB_RAW_SIZE, 
+					GFP_KERNEL, cpu_to_node(cpu));
+			skb->pool_id = cpu;
+			skb_queue_head(&skb_clone_pool->free_list, skb);
 		}
 	}
 	

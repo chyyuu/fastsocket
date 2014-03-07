@@ -251,6 +251,11 @@ enum {
 	SKB_FCLONE_CLONE,
 };
 
+#define REGULAR_SKB		0
+#define REGULAR_SKB_CLONE	1
+#define POOL_SKB		2
+#define POOL_SKB_CLONE		3
+
 enum {
 	SKB_GSO_TCPV4 = 1 << 0,
 	SKB_GSO_UDP = 1 << 1,
