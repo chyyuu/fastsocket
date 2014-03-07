@@ -74,6 +74,7 @@
 
 static struct kmem_cache *skbuff_head_cache __read_mostly;
 static struct kmem_cache *skbuff_fclone_cache __read_mostly;
+static struct kmem_cache *skbuff_fastsocket_cache __read_mostly;
 
 static void sock_pipe_buf_release(struct pipe_inode_info *pipe,
 				  struct pipe_buffer *buf)
@@ -172,8 +173,9 @@ EXPORT_SYMBOL(skb_under_panic);
  *	%GFP_ATOMIC.
  */
 
-volatile int enable_skb_pool = 0;
+int enable_skb_pool = 0;
 struct skb_pool __percpu *skb_pools = NULL;
+
 EXPORT_SYMBOL(enable_skb_pool);
 EXPORT_SYMBOL(skb_pools);
 
@@ -423,7 +425,9 @@ static void kfree_skbmem(struct sk_buff *skb)
 
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
-		if (enable_skb_pool && skb_pools && skb->pool_id >= 0) {
+		//if (enable_skb_pool && skb_pools && skb->pool_id >= 0) {
+		if (enable_skb_pool && skb->pool_id >= 0) {
+		//if (skb->pool_id >= 0) {
 			struct skb_pool *skb_pool;
 			
 			DPRINTK("Free skb[%d] 0x%p on CPU %d\n", 
@@ -2936,19 +2940,143 @@ done:
 }
 EXPORT_SYMBOL_GPL(skb_gro_receive);
 
+static volatile unsigned cpu_id;
+
+static struct skb_pool *skb_pool_get_online(loff_t *pos)
+{
+	struct skb_pool *rc = NULL;
+
+	while (*pos < nr_cpu_ids)
+		if (cpu_online(*pos)) {
+			rc = per_cpu_ptr(skb_pools, *pos);
+			break;
+		} else
+			++*pos;
+	cpu_id = *pos;
+
+	return rc;
+}
+
+static void *skb_pool_seq_next(struct seq_file *seq, void *v, loff_t *pos)
+{
+	++*pos;
+	return skb_pool_get_online(pos);
+}
+
+static void skb_pool_seq_stop(struct seq_file *seq, void *v)
+{
+
+}
+
+static void *skb_pool_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	seq_printf(seq, "%s\t%-15s%-15s\n",
+		"CPU", "Free_num", "Recycel_num");
+		
+	cpu_id = 0;
+
+	return skb_pool_get_online(pos);
+}
+
+static int skb_pool_seq_show(struct seq_file *seq, void *v)
+{
+	struct skb_pool *s = v;
+
+	seq_printf(seq, "%u\t%-15u%-15u\n", 
+		cpu_id, s->free_list.qlen, s->recyc_list.qlen);
+
+	return 0;
+}
+static const struct seq_operations skb_pool_seq_ops = {
+	.start = skb_pool_seq_start,
+	.next  = skb_pool_seq_next,
+	.stop  = skb_pool_seq_stop,
+	.show  = skb_pool_seq_show,
+};
+
+static int skb_pool_seq_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &skb_pool_seq_ops);
+}
+
+static const struct file_operations skb_pool_fops = {
+	.owner	 = THIS_MODULE,
+	.open    = skb_pool_seq_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = seq_release,
+};
+
+static inline void skb_init_pool_id(void *foo)
+{
+	struct sk_buff *skb = (struct sk_buff *)foo;
+
+	skb->pool_id = -1;
+}
+
+static inline void skb_init_pool_id_clone(void *foo)
+{
+	struct sk_buff *skb, *cskb;
+
+	skb = (struct sk_buff *)foo;
+	cskb = skb + 1;
+
+	skb->pool_id = cskb->pool_id = -1;
+}
+
 void __init skb_init(void)
 {
+	int cpu;
+
 	skbuff_head_cache = kmem_cache_create("skbuff_head_cache",
 					      sizeof(struct sk_buff),
 					      0,
 					      SLAB_HWCACHE_ALIGN|SLAB_PANIC,
-					      NULL);
+					      skb_init_pool_id);
 	skbuff_fclone_cache = kmem_cache_create("skbuff_fclone_cache",
 						(2*sizeof(struct sk_buff)) +
 						sizeof(atomic_t),
 						0,
 						SLAB_HWCACHE_ALIGN|SLAB_PANIC,
+						skb_init_pool_id_clone);
+
+	skbuff_fastsocket_cache = kmem_cache_create("skbuff_fastsocket_cache", 
+						sizeof(struct sk_buff), 
+						0, 
+						SLAB_HWCACHE_ALIGN | SLAB_PANIC, 
 						NULL);
+
+	skb_pools = alloc_percpu(struct skb_pool);
+	//if (!skb_pools) {
+	//	EPRINTK_LIMIT(ERR, "Allocate skb pool table failed\n");
+	//	return -ENOMEM;
+	//}
+
+	for_each_online_cpu(cpu) {
+		int i;
+		struct skb_pool *skb_pool = per_cpu_ptr(skb_pools, cpu);
+		struct sk_buff *skb;
+
+		skb_queue_head_init(&skb_pool->free_list);
+		skb_queue_head_init(&skb_pool->recyc_list);
+
+		for (i = 0; i < MAX_FASTSOCKET_POOL_SKB_NUM; i++) {
+			//FIXME: GFP_FLAG may take some considieration.
+			skb = kmem_cache_alloc_node(skbuff_fastsocket_cache, GFP_KERNEL, cpu_to_node(cpu));
+			//FIXME: Need more carefull release.
+			//if (!skb)
+			//	return -ENOMEM;
+			skb->data_cache = kmalloc_node(MAX_FASTSOCKET_SKB_RAW_SIZE, 
+					GFP_KERNEL, cpu_to_node(cpu));
+			//FIXME: Need more carefull release.
+			//if (!skb->data_cache)
+			//	return -ENOMEM;
+			skb->pool_id = cpu;
+			skb_queue_head(&skb_pool->free_list, skb);
+		}
+	}
+	
+	proc_net_fops_create(&init_net, "skb_pool", S_IRUGO, &skb_pool_fops);
 }
 
 /**

@@ -441,7 +441,7 @@ struct sk_buff {
 
 #define MAX_FASTSOCKET_SKB_RAW_SIZE     ( 2048 )
 #define MAX_FASTSOCKET_SKB_DATA_SIZE    ( 2048 - sizeof(struct skb_shared_info) )
-#define MAX_FASTSOCKET_POOL_SKB_NUM     ( 10 )
+#define MAX_FASTSOCKET_POOL_SKB_NUM     ( 1024 )
 
 #ifdef __KERNEL__
 /*
