@@ -228,6 +228,12 @@ struct skb_shared_info {
 struct skb_pool {
 	struct sk_buff_head free_list;
 	struct sk_buff_head recyc_list;
+	struct sk_buff_head clone_free_list;
+	struct sk_buff_head clone_recyc_list;
+	unsigned long pool_hit;
+	unsigned long slab_hit;
+	unsigned long clone_pool_hit;
+	unsigned long clone_slab_hit;
 };
 
 /* We divide dataref into two halves.  The higher 16 bits hold references
@@ -251,10 +257,10 @@ enum {
 	SKB_FCLONE_CLONE,
 };
 
-#define REGULAR_SKB		0
-#define REGULAR_SKB_CLONE	1
-#define POOL_SKB		2
-#define POOL_SKB_CLONE		3
+#define SLAB_SKB	0
+#define SLAB_SKB_CLONE	1
+#define POOL_SKB	2
+#define POOL_SKB_CLONE	3
 
 enum {
 	SKB_GSO_TCPV4 = 1 << 0,
@@ -486,6 +492,12 @@ static inline struct sk_buff *alloc_skb_fclone(unsigned int size,
 					       gfp_t priority)
 {
 	return __alloc_skb(size, priority, 1, -1);
+}
+
+static inline struct sk_buff *alloc_pool_skb_fclone(unsigned int size,
+					       gfp_t priority)
+{
+	return __alloc_skb(size, priority, POOL_SKB_CLONE, -1);
 }
 
 extern int skb_recycle_check(struct sk_buff *skb, int skb_size);

@@ -70,7 +70,9 @@
 
 #include "kmap_skb.h"
 
-#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
+#define DPRINTK(msg, args...) 
+
+//#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
 
 static struct kmem_cache *skbuff_head_cache __read_mostly;
 static struct kmem_cache *skbuff_fclone_cache __read_mostly;
@@ -175,7 +177,7 @@ EXPORT_SYMBOL(skb_under_panic);
  */
 
 int enable_skb_pool = 0;
-struct skb_pool __percpu *skb_pools, *skb_clone_pools;
+struct skb_pool __percpu *skb_pools;
 
 EXPORT_SYMBOL(enable_skb_pool);
 
@@ -183,57 +185,65 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			    int fclone, int node)
 {
 	struct kmem_cache *cache = NULL;
-	struct skb_pool *pools = NULL;
+	struct skb_pool *pool = NULL;
+	struct sk_buff_head *free_list = NULL;
+	struct sk_buff_head *recyc_list = NULL;
 	struct skb_shared_info *shinfo;
 	struct sk_buff *skb;
 	int clone;
 	u8 *data;
 
-	size = SKB_DATA_ALIGN(size);
+	pool = per_cpu_ptr(skb_pools, smp_processor_id());
 
+	size = SKB_DATA_ALIGN(size);
 	//cache = fclone ? skbuff_fclone_cache : skbuff_head_cache;
 
 	switch (fclone) {
-		case REGULAR_SKB:
+		case SLAB_SKB:
 			cache = skbuff_head_cache;
 			clone = 0;
+			pool->slab_hit++;
 			break;
-		case REGULAR_SKB_CLONE:
+		case SLAB_SKB_CLONE:
 			cache = skbuff_fclone_cache;
 			clone = 1;
+			pool->clone_slab_hit++;
 			break;
 		case POOL_SKB:
-			pools = skb_pools;
+			free_list = &pool->free_list;
+			recyc_list = &pool->recyc_list;
 			cache = skbuff_head_cache;
 			clone = 0;
+			pool->pool_hit++;
 			break;
 		case POOL_SKB_CLONE:
-			pools = skb_clone_pools;
+			free_list = &pool->clone_free_list;
+			recyc_list = &pool->clone_recyc_list;
 			cache = skbuff_fclone_cache;
 			clone = 1;
+			pool->clone_pool_hit++;
 			break;
 		default:
 			return NULL;
 	}
 
-	if (enable_skb_pool && pools && size < MAX_FASTSOCKET_SKB_DATA_SIZE) {
-		struct skb_pool *skb_pool;
+	if (enable_skb_pool && free_list && recyc_list && 
+			size < MAX_FASTSOCKET_SKB_DATA_SIZE) {
 
-		skb_pool = per_cpu_ptr(skb_pools, smp_processor_id());
-		skb = skb_dequeue(&skb_pool->free_list);
+		skb = skb_dequeue(free_list);
 		if (skb)
 			DPRINTK("Allocate skb[%d] 0x%p from %d free list\n", 
 					skb->pool_id, skb, smp_processor_id());
 		if (!skb) {
 			unsigned long flags;
 
-			DPRINTK("Splice %u skbs from recycle list\n", skb_pool->recyc_list.qlen);
+			DPRINTK("Splice %u skbs from recycle list\n", recyc_list->qlen);
 
-			spin_lock_irqsave(&(skb_pool->recyc_list.lock), flags);
-			skb_queue_splice_init(&skb_pool->recyc_list, &skb_pool->free_list);
-			spin_unlock_irqrestore(&(skb_pool->recyc_list.lock), flags);
+			spin_lock_irqsave(&recyc_list->lock, flags);
+			skb_queue_splice_init(recyc_list, free_list);
+			spin_unlock_irqrestore(&recyc_list->lock, flags);
 
-			skb = skb_dequeue(&skb_pool->free_list);
+			skb = skb_dequeue(free_list);
 		}
 		if (skb) {
 			data = skb->data_cache;
@@ -329,7 +339,10 @@ struct sk_buff *__netdev_alloc_skb(struct net_device *dev,
 	int node = dev->dev.parent ? dev_to_node(dev->dev.parent) : -1;
 	struct sk_buff *skb;
 
-	skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, POOL_SKB, node);
+	if (enable_skb_pool)
+		skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, POOL_SKB, node);
+	else
+		skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, SLAB_SKB, node);
 	if (likely(skb)) {
 		skb_reserve(skb, NET_SKB_PAD);
 		skb->dev = dev;
@@ -451,7 +464,6 @@ static void kfree_skbmem(struct sk_buff *skb)
 
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
-		//if (enable_skb_pool && skb->pool_id >= 0) {
 		if (skb->pool_id >= 0) {
 			struct skb_pool *skb_pool;
 			
@@ -2995,8 +3007,11 @@ static void skb_pool_seq_stop(struct seq_file *seq, void *v)
 
 static void *skb_pool_seq_start(struct seq_file *seq, loff_t *pos)
 {
-	seq_printf(seq, "%s\t%-15s%-15s\n",
-		"CPU", "Free_num", "Recycel_num");
+	seq_printf(seq, "%s\t%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s\n",
+		"CPU", "Free", "Recycle", 
+		"Pool_hit", "Slab_hit", 
+		"C_free", "C_recycle", 
+		"C_pool_hit", "C_slab_hit");
 		
 	cpu_id = 0;
 
@@ -3007,8 +3022,11 @@ static int skb_pool_seq_show(struct seq_file *seq, void *v)
 {
 	struct skb_pool *s = v;
 
-	seq_printf(seq, "%u\t%-15u%-15u\n", 
-		cpu_id, s->free_list.qlen, s->recyc_list.qlen);
+	seq_printf(seq, "%u\t%-15u%-15u%-15lu%-15lu%-15u%-15u%-15lu%-15lu\n", 
+		cpu_id, s->free_list.qlen, s->recyc_list.qlen, 
+		s->pool_hit, s->slab_hit,
+		s->clone_free_list.qlen, s->clone_recyc_list.qlen, 
+		s->clone_pool_hit, s->clone_slab_hit);
 
 	return 0;
 }
@@ -3024,12 +3042,28 @@ static int skb_pool_seq_open(struct inode *inode, struct file *file)
 	return seq_open(file, &skb_pool_seq_ops);
 }
 
+ssize_t skb_pool_reset(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+{
+	int cpu;
+	struct skb_pool *skb_pool;
+
+	for_each_online_cpu(cpu) {
+		skb_pool = per_cpu_ptr(skb_pools, cpu);
+		skb_pool->slab_hit = 0;
+		skb_pool->clone_slab_hit = 0;
+		skb_pool->pool_hit = 0;
+		skb_pool->clone_pool_hit = 0;
+	}
+
+	return 1;
+}
 static const struct file_operations skb_pool_fops = {
 	.owner	 = THIS_MODULE,
 	.open    = skb_pool_seq_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release,
+	.write   = skb_pool_reset,
 };
 
 static inline void skb_init_pool_id(void *foo)
@@ -3078,18 +3112,20 @@ void __init skb_init(void)
 						NULL);
 
 	skb_pools = alloc_percpu(struct skb_pool);
-	skb_clone_pools = alloc_percpu(struct skb_pool);
+	//skb_clone_pools = alloc_percpu(struct skb_pool);
 
 	for_each_online_cpu(cpu) {
 		int i;
 		struct skb_pool *skb_pool = per_cpu_ptr(skb_pools, cpu);
-		struct skb_pool *skb_clone_pool = per_cpu_ptr(skb_clone_pools, cpu);
+		//struct skb_pool *skb_clone_pool = per_cpu_ptr(skb_clone_pools, cpu);
 		struct sk_buff *skb;
 
 		skb_queue_head_init(&skb_pool->free_list);
 		skb_queue_head_init(&skb_pool->recyc_list);
-		skb_queue_head_init(&skb_clone_pool->free_list);
-		skb_queue_head_init(&skb_clone_pool->recyc_list);
+		skb_pool->pool_hit = skb_pool->slab_hit = 0;
+		skb_queue_head_init(&skb_pool->clone_free_list);
+		skb_queue_head_init(&skb_pool->clone_recyc_list);
+		skb_pool->clone_pool_hit = skb_pool->clone_slab_hit = 0;
 
 		for (i = 0; i < MAX_FASTSOCKET_POOL_SKB_NUM; i++) {
 			//FIXME: GFP_FLAG may take some considieration.
@@ -3107,7 +3143,7 @@ void __init skb_init(void)
 			skb->data_cache = kmalloc_node(MAX_FASTSOCKET_SKB_RAW_SIZE, 
 					GFP_KERNEL, cpu_to_node(cpu));
 			skb->pool_id = cpu;
-			skb_queue_head(&skb_clone_pool->free_list, skb);
+			skb_queue_head(&skb_pool->clone_free_list, skb);
 		}
 	}
 	
