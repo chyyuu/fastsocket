@@ -86,6 +86,8 @@ int sysctl_tcp_tw_reuse __read_mostly;
 int sysctl_tcp_low_latency __read_mostly;
 
 
+#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
+
 #ifdef CONFIG_TCP_MD5SIG
 static struct tcp_md5sig_key *tcp_v4_md5_do_lookup(struct sock *sk,
 						   __be32 addr);
@@ -1614,6 +1616,17 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	sk = __inet_lookup_skb(&tcp_hashinfo, skb, th->source, th->dest);
 	if (!sk)
 		goto no_tcp_socket;
+	
+	if (sock_flag(sk, SOCK_DIRECT_TCP)) {
+		DPRINTK("Skb hit direct TCP socket 0x%p\n", sk);
+		if (!sk->sk_rcv_dst) {
+			sk->sk_rcv_dst = skb_dst(skb);
+			DPRINTK("Record dst 0x%p on the direct TCP socket 0x%p\n", 
+					skb_dst(skb), sk);
+		} else {
+			DPRINTK("Dst 0x%p is recorded already on direct TCP socket 0x%p\n", sk->sk_rcv_dst, sk);
+		}
+	}
 
 process:
 	if (sk->sk_state == TCP_TIME_WAIT)

@@ -245,6 +245,7 @@ struct sock {
 	} sk_backlog;
 	wait_queue_head_t	*sk_sleep;
 	struct dst_entry	*sk_dst_cache;
+	struct dst_entry	*sk_rcv_dst;
 #ifdef CONFIG_XFRM
 	struct xfrm_policy	*sk_policy[2];
 #endif
@@ -554,6 +555,7 @@ enum sock_flags {
 	SOCK_TIMESTAMPING_SYS_HARDWARE, /* %SOF_TIMESTAMPING_SYS_HARDWARE */
 	SOCK_RXQ_OVFL,
 	SOCK_ZEROCOPY, /* buffers from userspace */
+	SOCK_DIRECT_TCP, /* bypass ip layer when receive skb */
 };
 
 static inline void sock_copy_flags(struct sock *nsk, struct sock *osk)

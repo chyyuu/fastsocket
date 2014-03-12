@@ -139,6 +139,8 @@
 #include <net/inet_hashtables.h>
 #include <net/tcp.h>
 
+#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
+
 /* Instead of increasing this, you should create a hash table. */
 #define MAX_GRO_SKBS 8
 
@@ -2870,7 +2872,7 @@ static int netif_deliver_cpu(unsigned short dport)
 
 #define RESERVED_SERVICE_PORT	1024
 
-static int netif_deliver_skb(struct sk_buff *skb)
+static int get_rfd_cpu(struct sk_buff *skb)
 {
 	if (skb->protocol != htons(ETH_P_IP))
 		return -1;
@@ -2931,13 +2933,59 @@ static int netif_deliver_skb(struct sk_buff *skb)
 int enable_receive_flow_deliver = 0;
 EXPORT_SYMBOL(enable_receive_flow_deliver);
 
+static void netif_direct_tcp(struct sk_buff *skb)
+{
+	if (skb->protocol != htons(ETH_P_IP))
+		return;
+
+	if (pskb_may_pull(skb, sizeof(struct iphdr))) {
+		struct iphdr *iph = (struct iphdr *)skb->data;
+		int iphl = iph->ihl;
+		u8 ip_proto = iph->protocol;
+		
+		if (ip_proto != IPPROTO_TCP)
+			return;
+
+		if (pskb_may_pull(skb, (iphl * 4) + sizeof(struct tcphdr))) {
+			struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
+			struct sock *sk;
+
+			sk = __inet_lookup_established(&init_net, &tcp_hashinfo, 
+					iph->saddr, th->source, iph->daddr, ntohs(th->dest), 
+					skb->dev->ifindex);
+			if (sk) {
+				if (sock_flag(sk, SOCK_DIRECT_TCP)) {
+					DPRINTK("Skb hit direct TCP established socket 0x%p\n", sk);
+					if(sk->sk_rcv_dst) {
+						skb_dst_set(skb, sk->sk_rcv_dst);
+						DPRINTK("Direct TCP established socket 0x%p has dst record 0x%p\n", 
+							sk, sk->sk_rcv_dst);
+					} else {
+						DPRINTK("Direct TCP established socket 0x%p has not dst record\n", sk);
+					}
+				} else {
+					DPRINTK("Skb hit common establishes socket 0x%p\n", sk);
+				}
+				skb->sk = sk;
+			}
+		}
+	}
+}
+
+int enable_direct_tcp = 0;
+EXPORT_SYMBOL(enable_direct_tcp);
+
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int cpu, ret;
 
+
+	if (enable_direct_tcp)
+		netif_direct_tcp(skb);
+
 	if (enable_receive_flow_deliver)
-		cpu = netif_deliver_skb(skb);
+		cpu = get_rfd_cpu(skb);
 	else
 		cpu = get_rps_cpu(skb->dev, skb, &rflow);
 
