@@ -31,7 +31,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.0.D-TCP");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
@@ -582,8 +582,10 @@ static int fsock_map_fd(struct socket *sock, int flags)
 
 static void fsocket_init_socket(struct socket *sock)
 {
-	if (enable_direct_tcp)
+	if (enable_direct_tcp) {
 		sock_set_flag(sock->sk, SOCK_DIRECT_TCP);
+		printk(KERN_DEBUG "Socket 0x%p is set with DIRECT_TCP\n", sock->sk);
+	}
 	sock->sk->sk_rcv_dst = NULL;
 }
 
@@ -1253,13 +1255,13 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		}
 	}
 
-	fsocket_init_socket(newsock);
-
 	if (err < 0) {
 		if (err != -EAGAIN)
 			EPRINTK_LIMIT(ERR, "Accept failed [%d]\n", err);
 		goto out_fd;
 	}
+
+	fsocket_init_socket(newsock);
 
 	if (upeer_sockaddr) {
 		if (newsock->ops->getname(newsock, (struct sockaddr *)&address, &len, 2) < 0) {
@@ -1581,6 +1583,8 @@ static int __init  fastsocket_init(void)
 		printk(KERN_INFO "Fastsocket: Enable Recieve Flow Deliver\n");
 	if (enable_fast_epoll)
 		printk(KERN_INFO "Fastsocket: Enable Fast Epoll\n");
+	if (enable_direct_tcp)
+		printk(KERN_INFO "Fastsocket: Enable Direct TCP\n");
 
 	return ret;
 }
@@ -1599,6 +1603,10 @@ static void __exit fastsocket_exit(void)
 	if (enable_receive_flow_deliver) {
 		enable_receive_flow_deliver = 0;
 		printk(KERN_INFO "Fastsocket: Disable Recieve Flow Deliver\n");
+	}
+	if (enable_direct_tcp) {
+		enable_direct_tcp = 0;
+		printk(KERN_INFO "Fastsocket: Disable Direct TCP\n");
 	}
 
 

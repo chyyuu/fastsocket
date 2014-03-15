@@ -144,6 +144,8 @@
 #include <linux/mroute.h>
 #include <linux/netlink.h>
 
+#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
+
 /*
  *	Process Router Attention IP option
  */
@@ -332,6 +334,8 @@ static int ip_rcv_finish(struct sk_buff *skb)
 	if (skb_dst(skb) == NULL) {
 		int err = ip_route_input(skb, iph->daddr, iph->saddr, iph->tos,
 					 skb->dev);
+		DPRINTK("Skb 0x%p needs to go through route lookup\n", skb);
+
 		if (unlikely(err)) {
 			if (err == -EHOSTUNREACH)
 				IP_INC_STATS_BH(dev_net(skb->dev),
@@ -341,6 +345,8 @@ static int ip_rcv_finish(struct sk_buff *skb)
 						IPSTATS_MIB_INNOROUTES);
 			goto drop;
 		}
+	} else {
+		DPRINTK("Skb 0x%p has set dst cache 0x%p\n", skb, skb_dst(skb));
 	}
 
 #ifdef CONFIG_NET_CLS_ROUTE

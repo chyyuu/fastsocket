@@ -2955,7 +2955,7 @@ static void netif_direct_tcp(struct sk_buff *skb)
 					skb->dev->ifindex);
 			if (sk) {
 				if (sock_flag(sk, SOCK_DIRECT_TCP)) {
-					DPRINTK("Skb hit direct TCP established socket 0x%p\n", sk);
+					DPRINTK("Skb 0x%p hit DIRECT_TCP established socket 0x%p\n", skb, sk);
 					if(sk->sk_rcv_dst) {
 						skb_dst_set(skb, sk->sk_rcv_dst);
 						DPRINTK("Direct TCP established socket 0x%p has dst record 0x%p\n", 
@@ -2964,7 +2964,7 @@ static void netif_direct_tcp(struct sk_buff *skb)
 						DPRINTK("Direct TCP established socket 0x%p has not dst record\n", sk);
 					}
 				} else {
-					DPRINTK("Skb hit common establishes socket 0x%p\n", sk);
+					DPRINTK("Skb 0x%p hit common establishes socket 0x%p\n", skb, sk);
 				}
 				skb->sk = sk;
 			}

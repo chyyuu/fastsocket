@@ -1618,14 +1618,21 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto no_tcp_socket;
 	
 	if (sock_flag(sk, SOCK_DIRECT_TCP)) {
-		DPRINTK("Skb hit direct TCP socket 0x%p\n", sk);
-		if (!sk->sk_rcv_dst) {
-			sk->sk_rcv_dst = skb_dst(skb);
-			DPRINTK("Record dst 0x%p on the direct TCP socket 0x%p\n", 
-					skb_dst(skb), sk);
+		DPRINTK("Skb 0x%p hit DIRECT_TCP socket 0x%p\n", skb, sk);
+		//if (!sk->sk_rcv_dst) {
+		if (sk->sk_state != TCP_LISTEN) {
+			if (!sk->sk_rcv_dst) {
+				sk->sk_rcv_dst = skb_dst(skb);
+				//FIXME: dst_use(dst, jiffies);
+				DPRINTK("Record dst 0x%p on the direct TCP socket 0x%p\n", skb_dst(skb), sk);
+			} else {
+				DPRINTK("Dst 0x%p is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, sk);
+			}
 		} else {
-			DPRINTK("Dst 0x%p is recorded already on direct TCP socket 0x%p\n", sk->sk_rcv_dst, sk);
+			DPRINTK("Skb 0x%p skip listen socket 0x%p\n", skb, sk);
 		}
+	} else {
+		DPRINTK("Skb 0x%p hit common socket 0x%p\n", skb, sk);
 	}
 
 process:
