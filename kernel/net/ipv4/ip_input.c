@@ -346,7 +346,7 @@ static int ip_rcv_finish(struct sk_buff *skb)
 			goto drop;
 		}
 	} else {
-		DPRINTK("Skb 0x%p has set dst cache 0x%p\n", skb, skb_dst(skb));
+		DPRINTK("Skb 0x%p has set dst cache 0x%p[%u]\n", skb, skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt));
 	}
 
 #ifdef CONFIG_NET_CLS_ROUTE

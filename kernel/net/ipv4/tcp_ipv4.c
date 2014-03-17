@@ -86,7 +86,7 @@ int sysctl_tcp_tw_reuse __read_mostly;
 int sysctl_tcp_low_latency __read_mostly;
 
 
-#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
+//#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
 
 #ifdef CONFIG_TCP_MD5SIG
 static struct tcp_md5sig_key *tcp_v4_md5_do_lookup(struct sock *sk,
@@ -1623,10 +1623,10 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		if (sk->sk_state != TCP_LISTEN) {
 			if (!sk->sk_rcv_dst) {
 				sk->sk_rcv_dst = skb_dst(skb);
-				//FIXME: dst_use(dst, jiffies);
-				DPRINTK("Record dst 0x%p on the direct TCP socket 0x%p\n", skb_dst(skb), sk);
+				dst_hold(sk->sk_rcv_dst);
+				DPRINTK("Record dst 0x%p[%u] on the direct TCP socket 0x%p\n", skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt), sk);
 			} else {
-				DPRINTK("Dst 0x%p is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, sk);
+				DPRINTK("Dst 0x%p[%u] is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
 			}
 		} else {
 			DPRINTK("Skb 0x%p skip listen socket 0x%p\n", skb, sk);

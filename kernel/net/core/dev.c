@@ -139,7 +139,7 @@
 #include <net/inet_hashtables.h>
 #include <net/tcp.h>
 
-#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
+//#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
 
 /* Instead of increasing this, you should create a hash table. */
 #define MAX_GRO_SKBS 8
@@ -2958,8 +2958,8 @@ static void netif_direct_tcp(struct sk_buff *skb)
 					DPRINTK("Skb 0x%p hit DIRECT_TCP established socket 0x%p\n", skb, sk);
 					if(sk->sk_rcv_dst) {
 						skb_dst_set(skb, sk->sk_rcv_dst);
-						DPRINTK("Direct TCP established socket 0x%p has dst record 0x%p\n", 
-							sk, sk->sk_rcv_dst);
+						skb->sock_dst = sk->sk_rcv_dst;
+						DPRINTK("Direct TCP established socket 0x%p has dst record 0x%p[%u]\n", sk, sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt));
 					} else {
 						DPRINTK("Direct TCP established socket 0x%p has not dst record\n", sk);
 					}

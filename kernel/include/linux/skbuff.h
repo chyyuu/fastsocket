@@ -336,6 +336,7 @@ struct sk_buff {
 	struct net_device	*dev;
 
 	unsigned long		_skb_dst;
+	struct dst_entry	*sock_dst;
 #ifdef CONFIG_XFRM
 	struct	sec_path	*sp;
 #endif
