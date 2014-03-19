@@ -1024,6 +1024,8 @@ static struct sock *sk_prot_alloc(struct proto *prot, gfp_t priority,
 		 */
 		sk->sk_prot_creator = prot;
 		sk_tx_queue_clear(sk);
+		sk->sk_rcv_dst = NULL;
+		FPRINTK("Initiate dst on socket 0x%p[:%u]\n", sk, inet_sk(sk)->num);
 	}
 
 	return sk;
@@ -1103,6 +1105,13 @@ static void __sk_free(struct sock *sk)
 	if (sk->sk_destruct)
 		sk->sk_destruct(sk);
 
+	FPRINTK("Release dst 0x%p on socket 0x%p[:%u]\n", sk->sk_rcv_dst, sk, inet_sk(sk)->num);
+
+	if (sock_flag(sk, SOCK_DIRECT_TCP) && sk->sk_rcv_dst) {
+		dst_release(sk->sk_rcv_dst);
+		sk->sk_rcv_dst = NULL;
+	}
+
 	filter = rcu_dereference(sk->sk_filter);
 	if (filter) {
 		sk_filter_uncharge(sk, filter);
@@ -1129,6 +1138,7 @@ void sk_free(struct sock *sk)
 	 */
 	if (atomic_dec_and_test(&sk->sk_wmem_alloc))
 		__sk_free(sk);
+	FPRINTK("Release socket 0x%p[%u]\n", sk, atomic_read(&sk->sk_wmem_alloc));
 }
 EXPORT_SYMBOL(sk_free);
 

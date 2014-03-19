@@ -31,7 +31,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.0.D-TCP");
+MODULE_VERSION("1.0.0.D-TCP.1");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
@@ -584,9 +584,9 @@ static void fsocket_init_socket(struct socket *sock)
 {
 	if (enable_direct_tcp) {
 		sock_set_flag(sock->sk, SOCK_DIRECT_TCP);
-		DPRINTK("Socket 0x%p is set with DIRECT_TCP\n", sock->sk);
+		FPRINTK("Socket 0x%p is set with DIRECT_TCP\n", sock->sk);
 	}
-	sock->sk->sk_rcv_dst = NULL;
+	//sock->sk->sk_rcv_dst = NULL;
 }
 
 static void fsocket_copy_socket(struct socket *oldsock, struct socket *newsock)
@@ -659,7 +659,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		goto out;
 	}
 
-	fsocket_init_socket(sock);
+	//fsocket_init_socket(sock);
 
 	sock->sk->sk_cpumask = 0;
 
@@ -1261,7 +1261,8 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		goto out_fd;
 	}
 
-	fsocket_init_socket(newsock);
+	/* Accepted socket flags are copied from listen socket */
+	//fsocket_init_socket(newsock);
 
 	if (upeer_sockaddr) {
 		if (newsock->ops->getname(newsock, (struct sockaddr *)&address, &len, 2) < 0) {

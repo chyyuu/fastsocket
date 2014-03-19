@@ -1618,21 +1618,22 @@ int tcp_v4_rcv(struct sk_buff *skb)
 		goto no_tcp_socket;
 	
 	if (sock_flag(sk, SOCK_DIRECT_TCP)) {
-		DPRINTK("Skb 0x%p hit DIRECT_TCP socket 0x%p\n", skb, sk);
+		FPRINTK("Skb 0x%p hit DIRECT_TCP socket 0x%p\n", skb, sk);
 		//if (!sk->sk_rcv_dst) {
 		if (sk->sk_state != TCP_LISTEN) {
 			if (!sk->sk_rcv_dst) {
+				//barrier();
 				sk->sk_rcv_dst = skb_dst(skb);
 				dst_hold(sk->sk_rcv_dst);
-				DPRINTK("Record dst 0x%p[%u] on the direct TCP socket 0x%p\n", skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt), sk);
+				FPRINTK("Record dst 0x%p[%u] on the direct TCP socket 0x%p\n", skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt), sk);
 			} else {
-				DPRINTK("Dst 0x%p[%u] is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
+				FPRINTK("Dst 0x%p[%u] is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
 			}
 		} else {
-			DPRINTK("Skb 0x%p skip listen socket 0x%p\n", skb, sk);
+			FPRINTK("Skb 0x%p skip listen socket 0x%p\n", skb, sk);
 		}
 	} else {
-		DPRINTK("Skb 0x%p hit common socket 0x%p\n", skb, sk);
+		FPRINTK("Skb 0x%p hit common socket 0x%p\n", skb, sk);
 	}
 
 process:

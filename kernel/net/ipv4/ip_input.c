@@ -144,7 +144,7 @@
 #include <linux/mroute.h>
 #include <linux/netlink.h>
 
-#define DPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
+//#define FPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
 
 /*
  *	Process Router Attention IP option
@@ -327,6 +327,8 @@ static int ip_rcv_finish(struct sk_buff *skb)
 	const struct iphdr *iph = ip_hdr(skb);
 	struct rtable *rt;
 
+	FPRINTK("Socket 0x%p stored in skb 0x%p\n", skb->sk, skb);
+
 	/*
 	 *	Initialise the virtual path cache for the packet. It describes
 	 *	how the packet travels inside Linux networking.
@@ -334,7 +336,7 @@ static int ip_rcv_finish(struct sk_buff *skb)
 	if (skb_dst(skb) == NULL) {
 		int err = ip_route_input(skb, iph->daddr, iph->saddr, iph->tos,
 					 skb->dev);
-		DPRINTK("Skb 0x%p needs to go through route lookup\n", skb);
+		FPRINTK("Skb 0x%p needs to go through route lookup\n", skb);
 
 		if (unlikely(err)) {
 			if (err == -EHOSTUNREACH)
@@ -346,7 +348,7 @@ static int ip_rcv_finish(struct sk_buff *skb)
 			goto drop;
 		}
 	} else {
-		DPRINTK("Skb 0x%p has set dst cache 0x%p[%u]\n", skb, skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt));
+		FPRINTK("Skb 0x%p has set dst cache 0x%p[%u]\n", skb, skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt));
 	}
 
 #ifdef CONFIG_NET_CLS_ROUTE
@@ -385,6 +387,8 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 {
 	struct iphdr *iph;
 	u32 len;
+
+	FPRINTK("Socket 0x%p stored in skb 0x%p\n", skb->sk, skb);
 
 	/* When the interface is in promisc. mode, drop all the crap
 	 * that it receives, do not try to analyse it.
@@ -447,7 +451,7 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	memset(IPCB(skb), 0, sizeof(struct inet_skb_parm));
 
 	/* Must drop socket now because of tproxy. */
-	skb_orphan(skb);
+	//skb_orphan(skb);
 
 	return NF_HOOK(PF_INET, NF_INET_PRE_ROUTING, skb, dev, NULL,
 		       ip_rcv_finish);

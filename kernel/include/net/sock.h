@@ -1195,6 +1195,8 @@ static inline void sock_put(struct sock *sk)
 {
 	if (atomic_dec_and_test(&sk->sk_refcnt))
 		sk_free(sk);
+
+	FPRINTK("Release socket 0x%p[%u]\n", sk, atomic_read(&sk->sk_refcnt));
 }
 
 extern int sk_receive_skb(struct sock *sk, struct sk_buff *skb,
@@ -1696,7 +1698,7 @@ static inline struct sock *skb_steal_sock(struct sk_buff *skb)
 	if (skb->sk) {
 		struct sock *sk = skb->sk;
 			
-		printk(KERN_DEBUG "Skb 0x%p has socket 0x%p set\n", skb, sk);
+		FPRINTK("Skb 0x%p has set socket 0x%p\n", skb, sk);
 
 		skb->destructor = NULL;
 		skb->sk = NULL;
