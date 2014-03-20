@@ -154,12 +154,11 @@ void inet_sock_destruct(struct sock *sk)
 
 	kfree(inet->opt);
 	dst_release(sk->sk_dst_cache);
-	//FPRINTK("Release dst 0x%p on socket 0x%p[%u-%u:%u]\n", sk->sk_rcv_dst, sk, inet_sk(sk)->num, sk->sk_protocol, sk->sk_type);
-	//if (sk->sk_rcv_dst) {
-	//	dst_release(sk->sk_rcv_dst);
-	//	sk->sk_rcv_dst = NULL;
-	//	FPRINTK("Release dst 0x%p[%u] on socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
-	//}
+	if (sk->sk_rcv_dst) {
+		FPRINTK("Release dst 0x%p[%u] on socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
+		dst_release(sk->sk_rcv_dst);
+		sk->sk_rcv_dst = NULL;
+	}
 	sk_refcnt_debug_dec(sk);
 }
 EXPORT_SYMBOL(inet_sock_destruct);

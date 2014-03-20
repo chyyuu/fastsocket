@@ -1105,12 +1105,12 @@ static void __sk_free(struct sock *sk)
 	if (sk->sk_destruct)
 		sk->sk_destruct(sk);
 
-	FPRINTK("Release dst 0x%p on socket 0x%p[:%u]\n", sk->sk_rcv_dst, sk, inet_sk(sk)->num);
-
-	if (sock_flag(sk, SOCK_DIRECT_TCP) && sk->sk_rcv_dst) {
-		dst_release(sk->sk_rcv_dst);
-		sk->sk_rcv_dst = NULL;
-	}
+	//FPRINTK("Release dst 0x%p on socket 0x%p[:%u]\n", sk->sk_rcv_dst, sk, inet_sk(sk)->num);
+//
+	//if (sock_flag(sk, SOCK_DIRECT_TCP) && sk->sk_rcv_dst) {
+	//	dst_release(sk->sk_rcv_dst);
+	//	sk->sk_rcv_dst = NULL;
+	//}
 
 	filter = rcu_dereference(sk->sk_filter);
 	if (filter) {

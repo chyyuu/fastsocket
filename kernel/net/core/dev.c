@@ -2772,8 +2772,6 @@ int __netif_receive_skb(struct sk_buff *skb)
 	}
 #endif
 
-	FPRINTK("Socket 0x%p stored in skb 0x%p\n", skb->sk, skb);
-
 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
 		if (ptype->dev == null_or_orig || ptype->dev == skb->dev ||
 		    ptype->dev == orig_dev) {
@@ -2832,8 +2830,6 @@ ncls:
 		 */
 		ret = NET_RX_DROP;
 	}
-
-	FPRINTK("Socket 0x%p stored in skb 0x%p\n", skb->sk, skb);
 
 out:
 	rcu_read_unlock();
@@ -2961,19 +2957,20 @@ static void netif_direct_tcp(struct sk_buff *skb)
 					iph->daddr, th->dest, skb->dev->ifindex);
 			if (sk) {
 				if (sock_flag(sk, SOCK_DIRECT_TCP)) {
-					FPRINTK("Skb 0x%p[:%u] hit DIRECT_TCP established socket 0x%p[:%u]\n", skb, ntohs(th->dest), sk, inet_sk(sk)->num);
+					FPRINTK("Skb 0x%p[:%u] hit DIRECT_TCP socket 0x%p[:%u]\n", skb, ntohs(th->dest), sk, inet_sk(sk)->num);
 					if(sk->sk_rcv_dst) {
 						skb_dst_set(skb, sk->sk_rcv_dst);
 						skb->sock_dst = sk->sk_rcv_dst;
-						FPRINTK("Direct TCP established socket 0x%p has dst record 0x%p[%u]\n", sk, sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt));
+						FPRINTK("Direct TCP socket 0x%p has dst record 0x%p[%u]\n", sk, sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt));
 					} else {
-						FPRINTK("Direct TCP established socket 0x%p has not dst record\n", sk);
+						FPRINTK("Direct TCP socket 0x%p has not dst record\n", sk);
 					}
+					skb->peek_sk = sk;
+					FPRINTK("Store socket 0x%p in skb 0x%p\n", sk, skb);
 				} else {
-					FPRINTK("Skb 0x%p[:%u] hit common establishes socket 0x%p[:%u]\n", skb,ntohs(th->dest), sk, inet_sk(sk)->num);
+					sock_put(sk);
+					FPRINTK("Skb 0x%p[:%u] hit common socket 0x%p[:%u]\n", skb,ntohs(th->dest), sk, inet_sk(sk)->num);
 				}
-				skb->sk = sk;
-				FPRINTK("Store socket 0x%p in skb 0x%p\n", sk, skb);
 			}
 		}
 	}
