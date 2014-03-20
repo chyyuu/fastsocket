@@ -158,8 +158,8 @@ static inline void dst_hold(struct dst_entry * dst)
 	BUILD_BUG_ON(offsetof(struct dst_entry, __refcnt) & 63);
 	atomic_inc(&dst->__refcnt);
 	//FPRINTK("Hold dst 0x%p[%u]\n", dst, atomic_read(&dst->__refcnt));
-	//printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t Hold dst 0x%p[%u]\n", smp_processor_id(), current->pid, __FUNCTION__, __LINE__, dst, atomic_read(&dst->__refcnt));
-	printk(KERN_DEBUG "Fastsocket [CPU%d] %s: Hold dst 0x%p[%u]\n", smp_processor_id(), __FUNCTION__, dst, atomic_read(&dst->__refcnt));
+	////printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t Hold dst 0x%p[%u]\n", smp_processor_id(), current->pid, __FUNCTION__, __LINE__, dst, atomic_read(&dst->__refcnt));
+	//printk(KERN_DEBUG "Fastsocket [CPU%d] %s: Hold dst 0x%p[%u]\n", smp_processor_id(), __FUNCTION__, dst, atomic_read(&dst->__refcnt));
 	//WARN_ON(1);
 }
 
@@ -176,7 +176,7 @@ struct dst_entry * dst_clone(struct dst_entry * dst)
 	if (dst) {
 		atomic_inc(&dst->__refcnt);
 		//FPRINTK("Clone dst 0x%p[%u]\n", dst, atomic_read(&dst->__refcnt));
-		printk(KERN_DEBUG "Fastsocket [CPU%d] %s: Clone dst 0x%p[%u]\n", smp_processor_id(), __FUNCTION__, dst, atomic_read(&dst->__refcnt));
+		//printk(KERN_DEBUG "Fastsocket [CPU%d] %s: Clone dst 0x%p[%u]\n", smp_processor_id(), __FUNCTION__, dst, atomic_read(&dst->__refcnt));
 		//WARN_ON(1);
 	}
 	return dst;
@@ -185,13 +185,14 @@ struct dst_entry * dst_clone(struct dst_entry * dst)
 extern void dst_release(struct dst_entry *dst);
 static inline void skb_dst_drop(struct sk_buff *skb)
 {
-	//if (!skb->sock_dst && skb->_skb_dst)
-	if (skb->sock_dst) {
-		printk(KERN_DEBUG "Fastsocket [CPU%d] %s: Skb 0x%p has stored socket dst 0x%p[%u]\n", smp_processor_id(), __FUNCTION__, skb, skb->sock_dst, atomic_read(&skb->sock_dst->__refcnt));
-		return;
-	}
-	if (skb->_skb_dst) {
-		printk(KERN_DEBUG "Fastsocket [CPU%d] %s: Skb 0x%p drop dst 0x%p[%u]\n", smp_processor_id(), __FUNCTION__, skb, skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt));
+	//printk(KERN_DEBUG "Fastsocket [CPU%d] %s: skb 0x%p, _skb_dst 0x%p, sock_dst 0x%p\n", smp_processor_id(), __FUNCTION__, skb, (void *)skb->_skb_dst, skb->sock_dst);
+	//if (skb->sock_dst) {
+		//printk(KERN_DEBUG "Fastsocket [CPU%d] %s: Skb 0x%p has stored socket dst 0x%p[%u]\n", smp_processor_id(), __FUNCTION__, skb, skb->sock_dst, atomic_read(&skb->sock_dst->__refcnt));
+	//	return;
+	//}
+	if (!skb->sock_dst && skb->_skb_dst) {
+	//if (skb->_skb_dst) {
+		//printk(KERN_DEBUG "Fastsocket [CPU%d] %s: Skb 0x%p drop dst 0x%p[%u]\n", smp_processor_id(), __FUNCTION__, skb, skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt));
 		dst_release(skb_dst(skb));
 	}
 	skb->_skb_dst = 0UL;
