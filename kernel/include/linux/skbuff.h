@@ -494,12 +494,15 @@ static inline struct sk_buff *alloc_skb(unsigned int size,
 					gfp_t priority)
 {
 	struct sk_buff *skb;
-	int clone = 0;
 
-	if (enable_skb_pool && in_softirq())
-		clone = POOL_SKB;
+	if (enable_skb_pool && likely(in_softirq())) {
+		//printk(KERN_DEBUG "Allocate pool skb in interrupt\n");
+		skb = __alloc_skb(size, priority, POOL_SKB, -1);
+	} else {
+		//printk(KERN_DEBUG "Allocate pool skb NOT in softirq\n");
+		skb = __alloc_skb(size, priority, 0, -1);
+	}
 
-	skb = __alloc_skb(size, priority, clone, -1);
 	FPRINTK("Allocate skb 0x%p\n", skb);
 
 	return skb;
@@ -509,12 +512,16 @@ static inline struct sk_buff *alloc_skb_fclone(unsigned int size,
 					       gfp_t priority)
 {
 	struct sk_buff *skb;
-	int clone = 1;
 
-	if (enable_skb_pool && !in_interrupt())
-		clone = POOL_SKB_CLONE;
+	if (enable_skb_pool && likely(!in_interrupt())) {
+		//printk(KERN_DEBUG "Allocate clone pool skb 0x%p NOT in interrupt\n", skb);
+		local_bh_disable();
+		skb = __alloc_skb(size, priority, POOL_SKB_CLONE, -1);
+		local_bh_enable();
+	} else {
+		skb = __alloc_skb(size, priority, 1, -1);
+	}
 
-	skb = __alloc_skb(size, priority, clone, -1);
 	FPRINTK("Allocate clone skb 0x%p\n", skb);
 
 	return skb;

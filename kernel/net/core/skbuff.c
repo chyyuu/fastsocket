@@ -238,10 +238,10 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 		skb = __skb_dequeue(free_list);
 		//local_bh_enable();
 		//local_irq_restore(flags);
-		if (skb)
-			DPRINTK("Allocate skb[%d] 0x%p from %d free list\n", 
-					skb->pool_id, skb, smp_processor_id());
-		if (!skb) {
+		//if (likely(skb))
+		//	DPRINTK("Allocate skb[%d] 0x%p from %d free list\n", 
+		//			skb->pool_id, skb, smp_processor_id());
+		if (unlikely(!skb)) {
 			unsigned long flags;
 
 			DPRINTK("Splice %u skbs from recycle list\n", recyc_list->qlen);
@@ -256,9 +256,10 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			data = skb->data_cache;
 			skb->pool_id = smp_processor_id();
 			goto init;
-		} else 
-			DPRINTK("Allocate skb failed from %d pool list\n", 
-					smp_processor_id());
+		}
+		//} else 
+		//	DPRINTK("Allocate skb failed from %d pool list\n", 
+		//			smp_processor_id());
 	}
 
 	/* Get the HEAD */
@@ -272,9 +273,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			gfp_mask, node);
 	if (!data)
 		goto nodata;
-
 init:
-
 	DPRINTK("Initialize skb[%d] %p\n", skb->pool_id, skb);
 
 	/*
@@ -472,12 +471,48 @@ static inline void kfree_pool_skb_clone(struct sk_buff *skb)
 
 	if (skb->pool_id == smp_processor_id()) {
 		__skb_queue_head(&skb_pool->clone_free_list, skb);
+		//if (likely(in_softirq())) {
+		//	__skb_queue_head(&skb_pool->clone_free_list, skb);
+		//	//printk(KERN_DEBUG "Free clone pool skb 0x%p in softirq\n", skb);
+		//} else {
+		//	//printk(KERN_DEBUG "Free clone pool skb 0x%p NOT in sofrirq\n", skb);
+		//	local_bh_disable();
+		//	__skb_queue_head(&skb_pool->clone_free_list, skb);
+		//	local_bh_disable();
+		//}
 		DPRINTK("Free clone pool skb[%d] 0x%p on CPU %d into free list\n", skb->pool_id, skb, smp_processor_id());
 	} else {
 		skb_queue_head(&skb_pool->clone_recyc_list, skb);
 		DPRINTK("Free clone pool skb[%d] 0x%p on CPU %d into recycle list\n", skb->pool_id, skb, smp_processor_id());
 	}
 }
+
+static inline void kfree_pool_skb(struct sk_buff *skb)
+{
+	struct skb_pool *skb_pool;
+
+	BUG_ON(skb->pool_id < 0);
+	
+	skb_pool = per_cpu_ptr(skb_pools, skb->pool_id);
+
+	if (skb->pool_id == smp_processor_id()) {
+		if (in_softirq()) {
+			DPRINTK("Free skb[%d] 0x%p in softirq on CPU %d\n", skb->pool_id, skb, smp_processor_id());
+			//printk(KERN_DEBUG "Free pool skb 0x%p in softirq\n", skb);
+			__skb_queue_head(&skb_pool->free_list, skb);
+		} else {
+			local_bh_disable();
+			__skb_queue_head(&skb_pool->free_list, skb);
+			local_bh_enable();
+			//printk(KERN_DEBUG "Free pool skb 0x%p NOT in softirq\n", skb);
+		}
+		DPRINTK("Free clone pool skb[%d] 0x%p on CPU %d into free list\n", skb->pool_id, skb, smp_processor_id());
+	} else {
+		skb_queue_head(&skb_pool->recyc_list, skb);
+		DPRINTK("Free clone pool skb[%d] 0x%p on CPU %d into recycle list\n", skb->pool_id, skb, smp_processor_id());
+	}
+}
+
 /*
  *	Free an skbuff by memory without cleaning the state.
  */
@@ -491,33 +526,34 @@ static void kfree_skbmem(struct sk_buff *skb)
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
 		if (skb->pool_id >= 0) {
-			struct skb_pool *skb_pool;
-			
-		       	skb_pool = per_cpu_ptr(skb_pools, skb->pool_id);
+			kfree_pool_skb(skb);
+			//struct skb_pool *skb_pool;
+			//
+		       	//skb_pool = per_cpu_ptr(skb_pools, skb->pool_id);
 
-			if (skb->pool_id == smp_processor_id()) {
-				//unsigned long flags;
+			//if (skb->pool_id == smp_processor_id()) {
+			//	//unsigned long flags;
 
-				//local_irq_save(flags);
-				if (in_softirq()) {
-					DPRINTK("Free skb[%d] 0x%p in softirq on CPU %d\n", skb->pool_id, skb, smp_processor_id());
-					__skb_queue_head(&skb_pool->free_list, skb);
-				} else {
-					DPRINTK("Free skb[%d] 0x%p NOT in softirq on CPU %d\n", skb->pool_id, skb, smp_processor_id());
-					local_bh_disable();
-					__skb_queue_head(&skb_pool->free_list, skb);
-					_local_bh_enable();
-				}
-				//local_irq_restore(flags);
+			//	//local_irq_save(flags);
+			//	if (in_softirq()) {
+			//		DPRINTK("Free skb[%d] 0x%p in softirq on CPU %d\n", skb->pool_id, skb, smp_processor_id());
+			//		__skb_queue_head(&skb_pool->free_list, skb);
+			//	} else {
+			//		DPRINTK("Free skb[%d] 0x%p NOT in softirq on CPU %d\n", skb->pool_id, skb, smp_processor_id());
+			//		local_bh_disable();
+			//		__skb_queue_head(&skb_pool->free_list, skb);
+			//		_local_bh_enable();
+			//	}
+			//	//local_irq_restore(flags);
 
-				DPRINTK("Put skb[%d] 0x%p into %d free list\n", 
-						skb->pool_id, skb, skb->pool_id);
-			}
-			else {
-				skb_queue_head(&skb_pool->recyc_list, skb);
-				DPRINTK("Put skb[%d] 0x%p into %d recycle list\n", 
-						skb->pool_id, skb, skb->pool_id);
-			}
+			//	DPRINTK("Put skb[%d] 0x%p into %d free list\n", 
+			//			skb->pool_id, skb, skb->pool_id);
+			//}
+			//else {
+			//	skb_queue_head(&skb_pool->recyc_list, skb);
+			//	DPRINTK("Put skb[%d] 0x%p into %d recycle list\n", 
+			//			skb->pool_id, skb, skb->pool_id);
+			//}
 		} else {
 			DPRINTK("Free regular skb[%d] 0x%p\n", skb->pool_id, skb);
 			kmem_cache_free(skbuff_head_cache, skb);
