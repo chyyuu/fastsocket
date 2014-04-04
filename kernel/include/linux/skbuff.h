@@ -30,6 +30,11 @@
 #include <linux/dmaengine.h>
 #include <linux/hrtimer.h>
 
+#include <linux/hardirq.h>
+
+//#define FPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d] %s:%d\t" msg, smp_processor_id(), __FUNCTION__, __LINE__, ## args);
+#define FPRINTK(msg, args...)
+
 /* Don't change this without changing skb_csum_unnecessary! */
 #define CHECKSUM_NONE 0
 #define CHECKSUM_UNNECESSARY 1
@@ -482,16 +487,37 @@ extern void consume_skb(struct sk_buff *skb);
 extern void	       __kfree_skb(struct sk_buff *skb);
 extern struct sk_buff *__alloc_skb(unsigned int size,
 				   gfp_t priority, int fclone, int node);
+
+extern int enable_skb_pool;
+
 static inline struct sk_buff *alloc_skb(unsigned int size,
 					gfp_t priority)
 {
-	return __alloc_skb(size, priority, 0, -1);
+	struct sk_buff *skb;
+	int clone = 0;
+
+	if (enable_skb_pool && in_softirq())
+		clone = POOL_SKB;
+
+	skb = __alloc_skb(size, priority, clone, -1);
+	FPRINTK("Allocate skb 0x%p\n", skb);
+
+	return skb;
 }
 
 static inline struct sk_buff *alloc_skb_fclone(unsigned int size,
 					       gfp_t priority)
 {
-	return __alloc_skb(size, priority, 1, -1);
+	struct sk_buff *skb;
+	int clone = 1;
+
+	if (enable_skb_pool && !in_interrupt())
+		clone = POOL_SKB_CLONE;
+
+	skb = __alloc_skb(size, priority, clone, -1);
+	FPRINTK("Allocate clone skb 0x%p\n", skb);
+
+	return skb;
 }
 
 static inline struct sk_buff *alloc_pool_skb_fclone(unsigned int size,
@@ -1502,10 +1528,20 @@ static inline void __skb_queue_purge(struct sk_buff_head *list)
  *
  *	%NULL is returned if there is no free memory.
  */
+
 static inline struct sk_buff *__dev_alloc_skb(unsigned int length,
 					      gfp_t gfp_mask)
 {
-	struct sk_buff *skb = alloc_skb(length + NET_SKB_PAD, gfp_mask);
+	struct sk_buff *skb;
+
+	if (enable_skb_pool) {
+		skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, POOL_SKB, -1);
+		FPRINTK("Allocate pool skb 0x%p\n", skb);
+	} else {
+		skb = alloc_skb(length + NET_SKB_PAD, gfp_mask);
+		FPRINTK("Allocate regular skb 0x%p\n", skb);
+	}
+
 	if (likely(skb))
 		skb_reserve(skb, NET_SKB_PAD);
 	return skb;

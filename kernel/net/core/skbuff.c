@@ -186,8 +186,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 {
 	struct kmem_cache *cache = NULL;
 	struct skb_pool *pool = NULL;
-	struct sk_buff_head *free_list = NULL;
-	struct sk_buff_head *recyc_list = NULL;
+	struct sk_buff_head *free_list = NULL, *recyc_list = NULL;
 	struct skb_shared_info *shinfo;
 	struct sk_buff *skb;
 	int clone;
@@ -227,10 +226,18 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			return NULL;
 	}
 
+	DPRINTK("Enable skb_pool %d, skb clone %d-%d, slab %s, free_list 0x%p, recyc_list 0x%p, packet size %d\n", 
+			enable_skb_pool, clone, fclone, cache->name, free_list, recyc_list, size);
+
 	if (enable_skb_pool && free_list && recyc_list && 
 			size < MAX_FASTSOCKET_SKB_DATA_SIZE) {
+		//unsigned long flags;
 
-		skb = skb_dequeue(free_list);
+		//local_irq_save(flags);
+		//local_bh_disable();
+		skb = __skb_dequeue(free_list);
+		//local_bh_enable();
+		//local_irq_restore(flags);
 		if (skb)
 			DPRINTK("Allocate skb[%d] 0x%p from %d free list\n", 
 					skb->pool_id, skb, smp_processor_id());
@@ -339,10 +346,13 @@ struct sk_buff *__netdev_alloc_skb(struct net_device *dev,
 	int node = dev->dev.parent ? dev_to_node(dev->dev.parent) : -1;
 	struct sk_buff *skb;
 
-	if (enable_skb_pool)
+	if (enable_skb_pool) {
 		skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, POOL_SKB, node);
-	else
+		DPRINTK("Allocate pool skb 0x%p\n", skb);
+	} else {
 		skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, SLAB_SKB, node);
+		DPRINTK("Allocate regular skb 0x%p\n", skb);
+	}
 	if (likely(skb)) {
 		skb_reserve(skb, NET_SKB_PAD);
 		skb->dev = dev;
@@ -452,6 +462,22 @@ static void skb_release_data(struct sk_buff *skb)
 	}
 }
 
+static inline void kfree_pool_skb_clone(struct sk_buff *skb)
+{
+	struct skb_pool *skb_pool;
+
+	BUG_ON(skb->pool_id < 0);
+	
+	skb_pool = per_cpu_ptr(skb_pools, skb->pool_id);
+
+	if (skb->pool_id == smp_processor_id()) {
+		__skb_queue_head(&skb_pool->clone_free_list, skb);
+		DPRINTK("Free clone pool skb[%d] 0x%p on CPU %d into free list\n", skb->pool_id, skb, smp_processor_id());
+	} else {
+		skb_queue_head(&skb_pool->clone_recyc_list, skb);
+		DPRINTK("Free clone pool skb[%d] 0x%p on CPU %d into recycle list\n", skb->pool_id, skb, smp_processor_id());
+	}
+}
 /*
  *	Free an skbuff by memory without cleaning the state.
  */
@@ -467,13 +493,23 @@ static void kfree_skbmem(struct sk_buff *skb)
 		if (skb->pool_id >= 0) {
 			struct skb_pool *skb_pool;
 			
-			DPRINTK("Free skb[%d] 0x%p on CPU %d\n", 
-					skb->pool_id, skb, smp_processor_id())
-
 		       	skb_pool = per_cpu_ptr(skb_pools, skb->pool_id);
 
 			if (skb->pool_id == smp_processor_id()) {
-				skb_queue_head(&skb_pool->free_list, skb);
+				//unsigned long flags;
+
+				//local_irq_save(flags);
+				if (in_softirq()) {
+					DPRINTK("Free skb[%d] 0x%p in softirq on CPU %d\n", skb->pool_id, skb, smp_processor_id());
+					__skb_queue_head(&skb_pool->free_list, skb);
+				} else {
+					DPRINTK("Free skb[%d] 0x%p NOT in softirq on CPU %d\n", skb->pool_id, skb, smp_processor_id());
+					local_bh_disable();
+					__skb_queue_head(&skb_pool->free_list, skb);
+					_local_bh_enable();
+				}
+				//local_irq_restore(flags);
+
 				DPRINTK("Put skb[%d] 0x%p into %d free list\n", 
 						skb->pool_id, skb, skb->pool_id);
 			}
@@ -490,8 +526,12 @@ static void kfree_skbmem(struct sk_buff *skb)
 
 	case SKB_FCLONE_ORIG:
 		fclone_ref = (atomic_t *) (skb + 2);
-		if (atomic_dec_and_test(fclone_ref))
-			kmem_cache_free(skbuff_fclone_cache, skb);
+		if (atomic_dec_and_test(fclone_ref)) {
+			if (skb->pool_id >= 0)
+				kfree_pool_skb_clone(skb);
+			else
+				kmem_cache_free(skbuff_fclone_cache, skb);
+		}
 		break;
 
 	case SKB_FCLONE_CLONE:
@@ -503,8 +543,12 @@ static void kfree_skbmem(struct sk_buff *skb)
 		 */
 		skb->fclone = SKB_FCLONE_UNAVAILABLE;
 
-		if (atomic_dec_and_test(fclone_ref))
-			kmem_cache_free(skbuff_fclone_cache, other);
+		if (atomic_dec_and_test(fclone_ref)) {
+			if (skb->pool_id >= 0)
+				kfree_pool_skb_clone(other);
+			else
+				kmem_cache_free(skbuff_fclone_cache, other);
+		}
 		break;
 	}
 }
@@ -3123,6 +3167,7 @@ void __init skb_init(void)
 		skb_queue_head_init(&skb_pool->free_list);
 		skb_queue_head_init(&skb_pool->recyc_list);
 		skb_pool->pool_hit = skb_pool->slab_hit = 0;
+
 		skb_queue_head_init(&skb_pool->clone_free_list);
 		skb_queue_head_init(&skb_pool->clone_recyc_list);
 		skb_pool->clone_pool_hit = skb_pool->clone_slab_hit = 0;
