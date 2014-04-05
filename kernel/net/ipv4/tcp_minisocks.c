@@ -348,13 +348,13 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
 		inet_twsk_schedule(tw, &tcp_death_row, timeo,
 				   sysctl_tcp_tw_timeout);
 		inet_twsk_put(tw);
-	} else {
+	} //else {
 		/* Sorry, if we're out of memory, just CLOSE this
 		 * socket up.  We've got bigger problems than
 		 * non-graceful socket closings.
 		 */
-		LIMIT_NETDEBUG(KERN_INFO "TCP: time wait bucket table overflow\n");
-	}
+	//	LIMIT_NETDEBUG(KERN_INFO "TCP: time wait bucket table overflow\n");
+	//}
 
 	tcp_update_metrics(sk);
 	tcp_done(sk);

@@ -245,6 +245,7 @@ struct sock {
 	} sk_backlog;
 	wait_queue_head_t	*sk_sleep;
 	struct dst_entry	*sk_dst_cache;
+	struct dst_entry	*sk_rcv_dst;
 #ifdef CONFIG_XFRM
 	struct xfrm_policy	*sk_policy[2];
 #endif
@@ -555,6 +556,7 @@ enum sock_flags {
 	SOCK_RXQ_OVFL,
 	SOCK_ZEROCOPY, /* buffers from userspace */
 	SOCK_SKB_POOL, /* use skb pool when xmit skb from the socket */	
+	SOCK_DIRECT_TCP, /* bypass ip layer when receive skb */
 };
 
 static inline void sock_copy_flags(struct sock *nsk, struct sock *osk)
@@ -1194,6 +1196,8 @@ static inline void sock_put(struct sock *sk)
 {
 	if (atomic_dec_and_test(&sk->sk_refcnt))
 		sk_free(sk);
+
+	FPRINTK("Release socket 0x%p[%u]\n", sk, atomic_read(&sk->sk_refcnt));
 }
 
 extern int sk_receive_skb(struct sock *sk, struct sk_buff *skb,
@@ -1691,9 +1695,14 @@ static inline void sk_change_net(struct sock *sk, struct net *net)
 
 static inline struct sock *skb_steal_sock(struct sk_buff *skb)
 {
+	if (skb->peek_sk) {
+		FPRINTK("Skb 0x%p has set socket 0x%p\n", skb, skb->peek_sk);
+		return skb->peek_sk;
+	}
+
 	if (unlikely(skb->sk)) {
 		struct sock *sk = skb->sk;
-
+			
 		skb->destructor = NULL;
 		skb->sk = NULL;
 		return sk;

@@ -154,6 +154,11 @@ void inet_sock_destruct(struct sock *sk)
 
 	kfree(inet->opt);
 	dst_release(sk->sk_dst_cache);
+	if (sk->sk_rcv_dst) {
+		FPRINTK("Release dst 0x%p[%u] on socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
+		dst_release(sk->sk_rcv_dst);
+		sk->sk_rcv_dst = NULL;
+	}
 	sk_refcnt_debug_dec(sk);
 }
 EXPORT_SYMBOL(inet_sock_destruct);
@@ -372,6 +377,7 @@ lookup_protocol:
 	sk->sk_destruct	   = inet_sock_destruct;
 	sk->sk_protocol	   = protocol;
 	sk->sk_backlog_rcv = sk->sk_prot->backlog_rcv;
+	//sk->sk_rcv_dst     = NULL;
 
 	inet->uc_ttl	= -1;
 	inet->mc_loop	= 1;
