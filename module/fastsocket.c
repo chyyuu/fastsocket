@@ -738,6 +738,13 @@ out:
 	return err;
 }
 
+static void fsocket_init_socket(struct socket *sock)
+{
+	if (enable_skb_pool) {
+		sock_set_flag(sock->sk, SOCK_SKB_POOL);
+	}
+}
+
 static int fsocket_socket(int flags)
 {
 	struct socket *sock;
@@ -764,6 +771,8 @@ static int fsocket_socket(int flags)
 		EPRINTK_LIMIT(ERR, "Initialize Inet Socket failed\n");
 		goto free_sock;
 	}
+
+	fsocket_init_socket(sock);
 
 	err = fsock_map_fd(sock, flags);
 	if (err < 0) {
@@ -1530,6 +1539,7 @@ static void init_once(void *foo)
 //#define MAX_FASTSOCKET_SKB_DATA_SIZE	( 2048 - sizeof(struct skb_shared_info) )
 //#define MAX_FASTSOCKET_POOL_SKB_NUM	( 10 )
 
+#if 0
 static int fastsocket_skb_init(void)
 {	
 	int ret = 0;
@@ -1539,7 +1549,6 @@ static int fastsocket_skb_init(void)
 	if (!enable_skb_pool)
 		return ret;
 
-#if 0
 	printk(KERN_INFO "Fastsocket skb pool is enabled\n");
 
 	skb_head = kmem_cache_create("fastsocket_skb_cache", sizeof(struct sk_buff), 
@@ -1581,10 +1590,10 @@ static int fastsocket_skb_init(void)
 
 	barrier();
 
-#endif
-
 	return ret;
 }
+
+#endif
 
 static int __init  fastsocket_init(void)
 {
@@ -1594,11 +1603,11 @@ static int __init  fastsocket_init(void)
 			num_online_cpus(), num_possible_cpus(),
 			num_present_cpus(), num_active_cpus());
 
-	ret = fastsocket_skb_init();
-	if (ret < 0) {
-		EPRINTK_LIMIT(ERR, "Initialize fastsocket skb failded\n");
-		return ret;
-	}
+	//ret = fastsocket_skb_init();
+	//if (ret < 0) {
+	//	EPRINTK_LIMIT(ERR, "Initialize fastsocket skb failded\n");
+	//	return ret;
+	//}
 
 	ret = misc_register(&fastsocket_dev);
 	if (ret < 0) {
