@@ -31,7 +31,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.2.SP-DT");
+MODULE_VERSION("1.0.2.SP-DT.3");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
@@ -52,7 +52,7 @@ MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
 MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
 MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disbale, 1 = Enabled[Default]");
-MODULE_PARM_DESC(enable_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Enabled[Default]");
+MODULE_PARM_DESC(enable_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Receive skb pool, 2 = Send skb pool,  3 = Both skb pool");
 MODULE_PARM_DESC(enable_direct_tcp, " Control Direct-TCP: 0 = Disbale[Default], 1 = Enabled");
 
 int inline fsocket_get_dbg_level(void)
@@ -585,9 +585,9 @@ static int fsock_map_fd(struct socket *sock, int flags)
 
 static void fsocket_init_socket(struct socket *sock)
 {
-	if (enable_skb_pool) {
-		sock_set_flag(sock->sk, SOCK_SKB_POOL);
-	}
+	//if (enable_skb_pool & ENABLE_ALL_SKB_POOL) {
+	//	sock_set_flag(sock->sk, SOCK_SKB_POOL);
+	//}
 	if (enable_direct_tcp) {
 		sock_set_flag(sock->sk, SOCK_DIRECT_TCP);
 		//FPRINTK("Socket 0x%p is set with DIRECT_TCP\n", sock->sk);
@@ -1659,7 +1659,7 @@ static int __init  fastsocket_init(void)
 	if (enable_fast_epoll)
 		printk(KERN_INFO "Fastsocket: Enable Fast Epoll\n");
 	if (enable_skb_pool)
-		printk(KERN_INFO "Fastsocket: Enable Skb Pool\n");
+		printk(KERN_INFO "Fastsocket: Enable Skb Pool[Mode-%d]\n", enable_skb_pool);
 	if (enable_direct_tcp)
 		printk(KERN_INFO "Fastsocket: Enable Direct TCP\n");
 
