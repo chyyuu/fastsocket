@@ -457,8 +457,8 @@ struct sk_buff {
 	atomic_t		users;
 };
 
-#define MAX_FASTSOCKET_SKB_RAW_SIZE     ( 2048 )
-#define MAX_FASTSOCKET_SKB_DATA_SIZE    ( 2048 - sizeof(struct skb_shared_info) )
+#define MAX_FASTSOCKET_SKB_RAW_SIZE     ( 4096 )
+#define MAX_FASTSOCKET_SKB_DATA_SIZE    ( 4096 - sizeof(struct skb_shared_info) )
 #define MAX_FASTSOCKET_POOL_SKB_NUM     ( 1024 )
 
 #ifdef __KERNEL__
@@ -490,6 +490,10 @@ extern void	       __kfree_skb(struct sk_buff *skb);
 extern struct sk_buff *__alloc_skb(unsigned int size,
 				   gfp_t priority, int fclone, int node);
 
+#define ENABLE_COMMON_SKB_POOL	0x01
+#define ENABLE_CLONE_SKB_POOL	0x02
+#define ENABLE_ALL_SKB_POOL	0x03
+
 extern int enable_skb_pool;
 
 static inline struct sk_buff *alloc_skb(unsigned int size,
@@ -497,12 +501,12 @@ static inline struct sk_buff *alloc_skb(unsigned int size,
 {
 	struct sk_buff *skb;
 
-	if (enable_skb_pool && likely(in_softirq())) {
+	if ((enable_skb_pool & ENABLE_COMMON_SKB_POOL) && likely(in_softirq())) {
 		//printk(KERN_DEBUG "Allocate pool skb in interrupt\n");
 		skb = __alloc_skb(size, priority, POOL_SKB, -1);
 	} else {
 		//printk(KERN_DEBUG "Allocate pool skb NOT in softirq\n");
-		skb = __alloc_skb(size, priority, 0, -1);
+		skb = __alloc_skb(size, priority, SLAB_SKB, -1);
 	}
 
 	FPRINTK("Allocate skb 0x%p\n", skb);
@@ -515,13 +519,13 @@ static inline struct sk_buff *alloc_skb_fclone(unsigned int size,
 {
 	struct sk_buff *skb;
 
-	if (enable_skb_pool && likely(!in_interrupt())) {
+	WARN_ON(unlikely(in_irq()));
+
+	if ((enable_skb_pool & ENABLE_CLONE_SKB_POOL) && likely(!in_interrupt())) {
 		//printk(KERN_DEBUG "Allocate clone pool skb 0x%p NOT in interrupt\n", skb);
-		local_bh_disable();
 		skb = __alloc_skb(size, priority, POOL_SKB_CLONE, -1);
-		local_bh_enable();
 	} else {
-		skb = __alloc_skb(size, priority, 1, -1);
+		skb = __alloc_skb(size, priority, SLAB_SKB_CLONE, -1);
 	}
 
 	FPRINTK("Allocate clone skb 0x%p\n", skb);

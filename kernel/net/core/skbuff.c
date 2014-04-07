@@ -181,6 +181,21 @@ struct skb_pool __percpu *skb_pools;
 
 EXPORT_SYMBOL(enable_skb_pool);
 
+static inline struct sk_buff *pool_skb_dequeue(struct sk_buff_head *list)
+{
+	struct sk_buff *skb;
+
+	if (in_softirq()) {
+		skb = __skb_dequeue(list);
+	} else {
+		local_bh_disable();
+		skb = __skb_dequeue(list);
+		local_bh_enable();
+	}
+
+	return skb;
+}
+
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			    int fclone, int node)
 {
@@ -231,13 +246,22 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 
 	if (enable_skb_pool && free_list && recyc_list && 
 			size < MAX_FASTSOCKET_SKB_DATA_SIZE) {
-		//unsigned long flags;
 
-		//local_irq_save(flags);
-		//local_bh_disable();
-		skb = __skb_dequeue(free_list);
-		//local_bh_enable();
-		//local_irq_restore(flags);
+		/* Single skb pool allocation is only made in softirq.
+		 * If the allocation is in the process context, it's a clone 
+		 * skb pool allocation and local softirq need disabled. */
+
+		//if (in_softirq()) {
+		//	skb = __skb_dequeue(free_list);
+		//} else {
+		//	local_bh_disable();
+		//	skb = __skb_dequeue(free_list);
+		//	local_bh_enable();
+		//}
+		
+		//skb = __skb_dequeue(free_list);
+		skb = pool_skb_dequeue(free_list);
+
 		//if (likely(skb))
 		//	DPRINTK("Allocate skb[%d] 0x%p from %d free list\n", 
 		//			skb->pool_id, skb, smp_processor_id());
@@ -250,7 +274,8 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			skb_queue_splice_init(recyc_list, free_list);
 			spin_unlock_irqrestore(&recyc_list->lock, flags);
 
-			skb = __skb_dequeue(free_list);
+			//skb = __skb_dequeue(free_list);
+			skb = pool_skb_dequeue(free_list);
 		}
 		if (skb) {
 			data = skb->data_cache;
@@ -469,17 +494,20 @@ static inline void kfree_pool_skb_clone(struct sk_buff *skb)
 	
 	skb_pool = per_cpu_ptr(skb_pools, skb->pool_id);
 
-	if (skb->pool_id == smp_processor_id()) {
-		__skb_queue_head(&skb_pool->clone_free_list, skb);
-		//if (likely(in_softirq())) {
-		//	__skb_queue_head(&skb_pool->clone_free_list, skb);
-		//	//printk(KERN_DEBUG "Free clone pool skb 0x%p in softirq\n", skb);
-		//} else {
-		//	//printk(KERN_DEBUG "Free clone pool skb 0x%p NOT in sofrirq\n", skb);
-		//	local_bh_disable();
-		//	__skb_queue_head(&skb_pool->clone_free_list, skb);
-		//	local_bh_disable();
-		//}
+	if (likely((skb->pool_id == smp_processor_id()))) {
+		//WARN_ON(!in_softirq());
+		//__skb_queue_head(&skb_pool->clone_free_list, skb);
+		if (likely(in_softirq())) {
+			__skb_queue_head(&skb_pool->clone_free_list, skb);
+			//printk(KERN_DEBUG "Free clone pool skb 0x%p in softirq\n", skb);
+		} else {
+			//WARN_ON(1);
+			//printk(KERN_DEBUG "Free clone pool skb 0x%p NOT in sofrirq\n", skb);
+
+			/* Since clone skb pool allocation is done in process context, 
+			 * No need to disable softirq here. */
+			__skb_queue_head(&skb_pool->clone_free_list, skb);
+		}
 		DPRINTK("Free clone pool skb[%d] 0x%p on CPU %d into free list\n", skb->pool_id, skb, smp_processor_id());
 	} else {
 		skb_queue_head(&skb_pool->clone_recyc_list, skb);
@@ -495,9 +523,9 @@ static inline void kfree_pool_skb(struct sk_buff *skb)
 	
 	skb_pool = per_cpu_ptr(skb_pools, skb->pool_id);
 
-	if (skb->pool_id == smp_processor_id()) {
+	if (likely(skb->pool_id == smp_processor_id())) {
 		if (in_softirq()) {
-			DPRINTK("Free skb[%d] 0x%p in softirq on CPU %d\n", skb->pool_id, skb, smp_processor_id());
+			//DPRINTK("Free skb[%d] 0x%p in softirq on CPU %d\n", skb->pool_id, skb, smp_processor_id());
 			//printk(KERN_DEBUG "Free pool skb 0x%p in softirq\n", skb);
 			__skb_queue_head(&skb_pool->free_list, skb);
 		} else {
