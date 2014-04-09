@@ -1693,11 +1693,26 @@ static inline void sk_change_net(struct sock *sk, struct net *net)
 	sock_net_set(sk, hold_net(net));
 }
 
+struct sock_lookup_stat
+{
+	unsigned long lookup_fast;
+	unsigned long lookup_slow;
+};
+
+extern struct sock_lookup_stat *sock_lookup_stats;
+
 static inline struct sock *skb_steal_sock(struct sk_buff *skb)
 {
+	struct sock_lookup_stat *stat;
+
+	stat = per_cpu_ptr(sock_lookup_stats, smp_processor_id());
+
 	if (skb->peek_sk) {
+		stat->lookup_fast++;
 		FPRINTK("Skb 0x%p has set socket 0x%p\n", skb, skb->peek_sk);
 		return skb->peek_sk;
+	} else {
+		stat->lookup_slow++;
 	}
 
 	if (unlikely(skb->sk)) {
