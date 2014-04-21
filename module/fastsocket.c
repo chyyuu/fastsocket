@@ -1023,6 +1023,8 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 
 	//DPRINTK(INFO, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
 
+	mutex_lock(&spawn_mutex);
+	
 	if (filp->sub_file) {
 		EPRINTK_LIMIT(ERR, "Spawn on a already spawned file 0x%p\n", filp);
 		ret = -EEXIST;
@@ -1032,13 +1034,11 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	sock  = (struct socket *)filp->private_data;
 
 	if (sock->sk->sk_state != TCP_LISTEN) {
-		EPRINTK_LIMIT(ERR, "Spawn on a non-listen socket file 0x%p\n", filp);
+		EPRINTK_LIMIT(ERR, "Spawn on a non-listen socket[%d-%d] file 0x%p\n", fd, sock->sk->sk_state, filp);
 		ret = -EINVAL;
 		goto out;
 	}
 
-	mutex_lock(&spawn_mutex);
-	
 	ret = fsocket_process_affinity_check();
 	if (ret < 0)
 	{
