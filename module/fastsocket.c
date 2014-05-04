@@ -1034,7 +1034,7 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	sock  = (struct socket *)filp->private_data;
 
 	if (sock->sk->sk_state != TCP_LISTEN) {
-		EPRINTK_LIMIT(ERR, "Spawn on a non-listen socket file 0x%p\n", filp);
+		EPRINTK_LIMIT(ERR, "Spawn on a non-listen socket[%d-%d] file 0x%p\n", fd, sock->sk->sk_state, filp);
 		ret = -EINVAL;
 		goto out;
 	}
