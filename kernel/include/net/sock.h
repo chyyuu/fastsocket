@@ -556,7 +556,9 @@ enum sock_flags {
 	SOCK_RXQ_OVFL,
 	SOCK_ZEROCOPY, /* buffers from userspace */
 	SOCK_SKB_POOL, /* use skb pool when xmit skb from the socket */	
-	SOCK_DIRECT_TCP, /* bypass ip layer when receive skb */
+	SOCK_DIRECT_TCP, /* bypass IP layer when receive skb */
+	SOCK_PASSIVE_OPEN,	/* Passive connection socket */
+	SOCK_ACTIVE_OPEN, 	/* Active connection socket */
 };
 
 static inline void sock_copy_flags(struct sock *nsk, struct sock *osk)
