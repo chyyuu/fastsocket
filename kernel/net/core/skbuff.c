@@ -455,6 +455,9 @@ static void skb_clone_fraglist(struct sk_buff *skb)
 
 static void skb_release_data(struct sk_buff *skb)
 {
+	if (skb->pool_id >= 0)
+		return;
+
 	if (!skb->cloned ||
 	    !atomic_sub_return(skb->nohdr ? (1 << SKB_DATAREF_SHIFT) + 1 : 1,
 			       &skb_shinfo(skb)->dataref)) {
@@ -479,8 +482,8 @@ static void skb_release_data(struct sk_buff *skb)
 		if (skb_has_frags(skb))
 			skb_drop_fraglist(skb);
 
-		if (skb->pool_id >= 0)
-			return;
+		//if (skb->pool_id >= 0)
+		//	return;
 
 		kfree(skb->head);
 	}
