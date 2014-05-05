@@ -1547,7 +1547,7 @@ static inline struct sk_buff *__dev_alloc_skb(unsigned int length,
 {
 	struct sk_buff *skb;
 
-	if (enable_skb_pool) {
+	if (enable_skb_pool & ENABLE_COMMON_SKB_POOL)  {
 		skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, POOL_SKB, -1);
 		FPRINTK("Allocate pool skb 0x%p\n", skb);
 	} else {
